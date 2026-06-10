@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ME COIN — Mint Yourself. Someone Will Pay.</title>
+<meta name="description" content="Turn yourself into a limited-supply holo-foil trading card. Set the supply. Share the link. Buyers pay whatever they want.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060608'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%23c8ff00' stroke-width='2'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%23c8ff00' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="logo" href="/">ME&nbsp;<b>COIN</b><span class="logo-tm">TM</span></a>
+  <nav>
+    <a href="#builder">MINT</a>
+    <a href="#sim">SIM MARKET</a>
+    <a href="/rules">RULES</a>
+  </nav>
+</header>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="wrap">
+    <p class="hero-kicker">/// the personal scarcity engine</p>
+    <h1 class="hero-title">Mint<br>yourself.<br><span class="accent">Someone will&nbsp;pay.</span></h1>
+    <p class="hero-sub">
+      Turn your face into a limited-run <b>holo-foil trading card</b>. You set the supply.
+      You share the link. Buyers pay <b>whatever they want</b> — real money, named by them.
+      Value is a group hallucination. Join one.
+    </p>
+    <div class="hero-cta-row">
+      <a class="btn" href="#builder">START THE PRESS</a>
+      <span class="hero-fine">minting is free. dignity sold separately.</span>
+    </div>
+  </div>
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">✕</span>
+      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">✕</span>
+      <span>PAY WHAT YOU WANT — MIN $0.50, STRIPE PHYSICS</span><span class="mq-x">✕</span>
+      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">✕</span>
+      <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">✕</span>
+      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">✕</span>
+      <span>PAY WHAT YOU WANT — MIN $0.50, STRIPE PHYSICS</span><span class="mq-x">✕</span>
+      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">✕</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BUILDER ============ -->
+<section class="builder-sec" id="builder">
+  <div class="wrap">
+    <div class="builder-grid">
+
+      <div class="preview-col">
+        <div class="preview-sticky">
+          <div id="card-stage"></div>
+          <p class="preview-hint">hover to inspect — click to flip</p>
+          <div class="vpc-box panel">
+            <span class="label">SIM value per card</span>
+            <span id="vpc" class="big-num acid">$10,000.00</span>
+            <p class="fine">= $1,000,000 imaginary pool ÷ your supply. Simulated. Obviously.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls-col">
+        <h2 class="sec-title">The Press</h2>
+        <p class="sec-sub">// build the asset. the asset is you.</p>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="name">Your name</label>
+            <span class="field-meta" id="name-count">0/40</span>
+          </div>
+          <input class="tin" id="name" maxlength="40" placeholder="BIG NICK ENERGY" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="photo">The asset (your face)</label>
+            <span class="field-meta" id="photo-meta">NO FILE</span>
+          </div>
+          <label class="dropzone" id="dropzone" for="photo">
+            <span class="dz-big">Drop a photo</span>
+            <span class="dz-small">or click — JPG / PNG / WebP, auto-pressed to ≤700px foil-grade JPEG</span>
+          </label>
+          <input type="file" id="photo" accept="image/*" hidden>
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="tagline">Tagline</label>
+            <span class="field-meta" id="tagline-count">0/100</span>
+          </div>
+          <input class="tin" id="tagline" maxlength="100" placeholder="limited. like my patience." autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="supply">Scarcity dial</label>
+            <input class="numin" id="supply-num" type="number" min="1" max="1000" value="100" aria-label="Supply (number)">
+          </div>
+          <div class="supply-row">
+            <input type="range" id="supply" class="dial" min="1" max="1000" step="1" value="100" aria-label="Supply 1 to 1000">
+          </div>
+          <div class="ticks" aria-hidden="true"><span>1</span><span>250</span><span>500</span><span>750</span><span>1000</span></div>
+          <p class="fine">SUPPLY IS WHATEVER YOU SAY IT IS.</p>
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="simprice">Sim asking price</label>
+            <span class="field-meta cyan" id="simprice-read">$10.00</span>
+          </div>
+          <input class="tin" id="simprice" value="10" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="simprice-help">
+          <p class="fine" id="simprice-help">PRETEND MONEY for the sim market below. $0.01 – $10T. Suffixes work: 4.2K, 69M, 1T.</p>
+        </div>
+
+        <button class="btn btn-huge" id="mint-btn">MINT ME — IT'S FREE</button>
+        <div class="errbox" id="mint-err" hidden></div>
+        <p class="fine">Minting creates a real, shareable card page. Selling for real money is optional and comes later, on your card page. By minting you agree to the <a href="/rules">rules</a>.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============ SIM MARKET ============ -->
+<section class="sim-sec" id="sim">
+  <div class="wrap">
+    <div class="sim-head">
+      <h2 class="sec-title">Sim Market</h2>
+      <span class="sim-badge">SIMULATION — THESE PEOPLE ARE NOT REAL</span>
+    </div>
+    <div class="sim-stats">
+      <div class="stat"><span class="label">Sim supply left</span><span class="val" id="sim-left">100</span></div>
+      <div class="stat"><span class="label">Sim total raised</span><span class="val acid" id="sim-raised">$0.00</span></div>
+      <div class="stat"><span class="label">Asking (sim)</span><span class="val cyan" id="sim-price">$10.00</span></div>
+      <div class="stat"><span class="label">Crowd mood</span><span class="val" id="sim-mood">—</span></div>
+    </div>
+    <div class="feed-box panel">
+      <div class="feed-head">
+        <span class="label">live(ish) order flow — 0% real</span>
+        <span class="live-dot" aria-hidden="true"></span>
+      </div>
+      <div id="sim-feed" class="feed" aria-live="off"></div>
+    </div>
+    <p class="fine">The sim market reacts to your asking price vs. the $1,000,000 ÷ supply "fair value". Price it cheap → frenzy. Price it greedy → mockery. None of it is real and none of these people exist.</p>
+  </div>
+</section>
+
+<!-- ============ GALLERY ============ -->
+<section class="gallery-sec" id="gallery-sec">
+  <div class="wrap">
+    <h2 class="sec-title">Fresh Mints</h2>
+    <p class="sec-sub">// recently minted humans. click one. name a price.</p>
+    <div id="gallery" class="slab-grid"></div>
+    <p id="gallery-empty" class="gallery-empty" hidden>Nobody has minted themselves yet. Be patient zero.</p>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="foot-grid">
+      <p class="disclaimer">ME COIN cards are digital collectibles for fun. They are not investments, securities, or stores of value. No resale market is provided or promised.</p>
+      <nav>
+        <a href="/rules">Rules &amp; Terms</a>
+        <a href="#builder">Mint</a>
+      </nav>
+    </div>
+    <p class="foot-fine">ME COIN © 2026 — a bit, taken completely seriously.</p>
+  </div>
+</footer>
+
+<script src="/cardart.js" defer></script>
+<script src="/app.js" defer></script>
+</body>
+</html>

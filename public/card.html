@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--OG-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060608'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%23c8ff00' stroke-width='2'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%23c8ff00' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="logo" href="/">ME&nbsp;<b>COIN</b><span class="logo-tm">TM</span></a>
+  <nav>
+    <a href="/#builder">MINT YOUR OWN</a>
+    <a href="/rules">RULES</a>
+  </nav>
+</header>
+
+<main class="cardpage">
+  <div class="wrap">
+
+    <!-- not-found state (no window.__CARD__) -->
+    <div class="notfound" id="notfound" hidden>
+      <h1>Card not found</h1>
+      <p>This page was opened without a real card behind it — it may have been pulled, or you reached <code>/card.html</code> directly.<br><a href="/">&larr; Go mint one</a></p>
+    </div>
+
+    <div class="cardpage-grid" id="card-main" hidden>
+
+      <div class="cp-card-col">
+        <div id="card-stage"></div>
+        <p class="preview-hint">hover to inspect — click to flip the certificate</p>
+        <div class="cp-actions">
+          <button class="btn-ghost" id="share-btn" type="button">COPY SHARE LINK</button>
+          <button class="btn-ghost" id="png-btn" type="button">DOWNLOAD PNG</button>
+        </div>
+      </div>
+
+      <div class="cp-info-col">
+        <p class="cp-kicker" id="cp-kicker">/// CARD</p>
+        <h1 class="cp-name" id="cp-name"></h1>
+        <p class="cp-tagline" id="cp-tagline"></p>
+
+        <div class="stats-row">
+          <div class="stat is-acid"><span class="label">Last paid</span><span class="val" id="st-last">—</span></div>
+          <div class="stat"><span class="label">Avg paid</span><span class="val" id="st-avg">—</span></div>
+          <div class="stat is-acid"><span class="label">Total raised</span><span class="val" id="st-raised">$0.00</span></div>
+          <div class="stat"><span class="label">Left</span><span class="val" id="st-left">—</span></div>
+        </div>
+
+        <!-- BUY: onboarded & not sold out -->
+        <div class="panel buybox" id="buybox" hidden>
+          <span class="label">Name your price — it's worth what you pay</span>
+          <div class="amt-wrap">
+            <span class="amt-dollar">$</span>
+            <input class="amt-input" id="amt" inputmode="decimal" placeholder="5" autocomplete="off" spellcheck="false" aria-label="Amount in US dollars">
+          </div>
+          <div class="chips" id="chips"></div>
+          <button class="btn btn-huge" id="buy-btn" type="button">NAME YOUR PRICE</button>
+          <div class="errbox" id="buy-err" hidden></div>
+          <p class="fine" id="buy-fine">Minimum $0.50 — Stripe physics, not ours. Maximum $999,999.99. You pick everything in between.</p>
+        </div>
+
+        <!-- NOT FOR SALE: not onboarded -->
+        <div class="panel nfs" id="nfs" hidden>
+          <p class="nfs-title">Not on the market yet</p>
+          <p class="fine" id="nfs-fine">The owner minted this card but hasn't switched on real selling. No price, no buying — yet.</p>
+        </div>
+
+        <!-- SOLD OUT -->
+        <div class="panel soldout-box" id="soldout" hidden>
+          <p class="soldout-title">SOLD OUT</p>
+          <p class="fine">Every numbered copy of this human has been claimed. The hallucination held.</p>
+        </div>
+
+        <!-- OWNER PANEL -->
+        <div class="panel owner-panel" id="owner" hidden>
+          <p class="own-status" id="own-status"></p>
+          <div id="owner-actions"></div>
+          <div class="errbox" id="owner-err" hidden></div>
+          <p class="fine">This browser holds the manage key, so it controls the card. Onboarding switches the BUY button on. Delisting hides it for good.</p>
+        </div>
+
+        <div class="cp-actions" style="justify-content:flex-start">
+          <a class="report-link" id="report-link" href="#">&#9873; Report this card</a>
+        </div>
+
+        <div class="feed-box panel" id="sales-wrap" hidden>
+          <div class="feed-head">
+            <span class="label">real sales — newest first</span>
+            <span class="live-dot" aria-hidden="true"></span>
+          </div>
+          <div id="sales-feed" class="feed" aria-live="off"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="foot-grid">
+      <p class="disclaimer">ME COIN cards are digital collectibles for fun. They are not investments, securities, or stores of value. No resale market is provided or promised.</p>
+      <nav>
+        <a href="/rules">Rules &amp; Terms</a>
+        <a href="/#builder">Mint your own</a>
+      </nav>
+    </div>
+    <p class="foot-fine">ME COIN © 2026 — a bit, taken completely seriously.</p>
+  </div>
+</footer>
+
+<script id="card-data">/*__CARD__*/</script>
+<script src="/cardart.js" defer></script>
+<script src="/card-page.js" defer></script>
+</body>
+</html>

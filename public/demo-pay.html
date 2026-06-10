@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo checkout — ME COIN</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060608'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%23c8ff00' stroke-width='2'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%23c8ff00' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<main class="demopage">
+
+  <div id="notfound" class="notfound" hidden>
+    <h1>Nothing to pay for</h1>
+    <p>This demo checkout link is invalid or expired.<br><a href="/">&larr; Back to the mint</a></p>
+  </div>
+
+  <div id="paybox" hidden>
+    <div class="demo-strip">DEMO CHECKOUT — NO REAL MONEY MOVES — THIS IS A SIMULATION OF STRIPE</div>
+    <h1 class="demo-title">Confirm your (pretend) payment</h1>
+    <p class="demo-sub">In real mode this is Stripe's hosted checkout. Here, it's theatre — clicking confirm mints you a real, numbered copy without charging a cent.</p>
+
+    <div class="pay-row">
+      <img class="pay-thumb" id="pay-thumb" alt="">
+      <div>
+        <div class="pay-name" id="pay-name"></div>
+        <div class="pay-id" id="pay-id"></div>
+      </div>
+    </div>
+    <div class="pay-row">
+      <span class="label" style="margin:0">You're paying</span>
+      <div class="pay-meta">
+        <div class="pay-amount" id="pay-amount">$0.00</div>
+      </div>
+    </div>
+
+    <button class="btn btn-huge" id="confirm-btn" type="button">CONFIRM — SIMULATE PAYMENT</button>
+    <div class="errbox" id="pay-err" hidden></div>
+    <a class="cancel-link" id="cancel-link" href="/">cancel and go back</a>
+  </div>
+
+</main>
+
+<script id="demo-data">/*__DEMO__*/</script>
+<script src="/cardart.js" defer></script>
+<script src="/demo-pay.js" defer></script>
+</body>
+</html>

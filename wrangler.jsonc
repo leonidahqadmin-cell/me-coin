@@ -1,0 +1,17 @@
+{
+  "name": "me-coin",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/c/*", "/webhook", "/demo-pay", "/success", "/admin/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "me-coin-db",
+      "database_id": "REPLACE_AT_DEPLOY"
+    }
+  ]
+}
