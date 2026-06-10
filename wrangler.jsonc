@@ -11,7 +11,7 @@
     {
       "binding": "DB",
       "database_name": "me-coin-db",
-      "database_id": "REPLACE_AT_DEPLOY"
+      "database_id": "ba99482d-c21c-4665-b644-b5a55a31e417"
     }
   ]
 }

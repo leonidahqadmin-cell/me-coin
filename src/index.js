@@ -25,8 +25,10 @@ import { stripePost, stripeGet, verifyStripeSignature, timingSafeEqualStr } from
 // scripts is REQUIRED because the §5 payload scripts are inline; this is safe
 // because every inline payload is server-escaped JSON (jsonForScript) and user
 // data is never interpolated into HTML unescaped.
+// img-src includes blob: so the builder can load an uploaded photo via
+// URL.createObjectURL() for client-side resizing before it becomes a data URL.
 const CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'";
 
 const CARD_ID_RE = /^[a-z0-9]{10}$/;
 const MANAGE_KEY_RE = /^[0-9a-f]{32}$/;
