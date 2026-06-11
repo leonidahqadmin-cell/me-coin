@@ -10,6 +10,9 @@ export const REASON_MAX      = 300;          // report reason characters
 export const PHOTO_MAX_CHARS = 512000;       // dataURL STRING length ≤ 500 KiB
 export const PHOTO_PREFIX_RE = /^data:image\/(jpeg|png|webp);base64,/;
 export const FEE_RATE        = 0.10;         // platform fee
-export const feeCents = (amountCents) => Math.round(amountCents * 0.10);
+export const FEE_MIN_CENTS   = 50;           // floor — Stripe's ~2.9%+30¢ makes
+                                             // flat 10% negative under ~$4.50
+export const feeCents = (amountCents) =>
+  Math.min(amountCents, Math.max(Math.round(amountCents * 0.10), FEE_MIN_CENTS));
 export const MINT_LIMIT_PER_IP = 20;         // per rolling 3600s window → 429
 export const QUICK_CHIPS_CENTS = [100, 500, 2000];  // $1 / $5 / $20

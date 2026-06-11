@@ -603,7 +603,14 @@ async function handleWebhook(request, env) {
           `webhook: card ${cardId} sold out at fulfillment — refunding payment_intent ${session.payment_intent} (session ${session.id})`,
         );
         try {
-          await stripePost(env, '/v1/refunds', [['payment_intent', String(session.payment_intent)]]);
+          // Destination charge: pull the transfer back from the connected
+          // account and return our application fee, or the platform eats
+          // the refund while the creator keeps the money.
+          await stripePost(env, '/v1/refunds', [
+            ['payment_intent', String(session.payment_intent)],
+            ['reverse_transfer', 'true'],
+            ['refund_application_fee', 'true'],
+          ]);
         } catch (refundErr) {
           console.error('webhook: refund attempt failed (manual follow-up needed):', refundErr);
         }
