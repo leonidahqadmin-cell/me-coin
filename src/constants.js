@@ -1,7 +1,7 @@
 // ME COIN — shared constants (ARCHITECTURE.md §2 — EXACT values; changes land
 // with a matching ARCHITECTURE.md edit in the same commit).
 
-export const VERSION = 'v0.5.0';             // bumped on every release; live at /api/config
+export const VERSION = 'v0.6.0';             // bumped on every release; live at /api/config
 
 export const AMOUNT_MIN_CENTS = 100;         // $1.00 — creator net must never be $0
 export const AMOUNT_MAX_CENTS = 99999999;    // schema bound only — launch caps below rule

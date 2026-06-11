@@ -21,6 +21,7 @@
 
     var card = data;                 // reassigned by refresh()
     var manageKey = M.keyFor(card.id);
+    var mode = null;                 // 'real' | 'demo' | null (unknown until config loads)
 
     /* ---- the flip card ---- */
     var view = M.createCard({});
@@ -49,8 +50,10 @@
       return Math.max(card.price_floor_cents || M.AMOUNT_MIN_CENTS, M.AMOUNT_MIN_CENTS);
     }
     function capCents() {
-      return (Date.now() - card.created_at < M.YOUNG_CARD_MS)
+      var base = (Date.now() - card.created_at < M.YOUNG_CARD_MS)
         ? M.YOUNG_CARD_CAP_CENTS : M.LAUNCH_PRICE_CAP_CENTS;
+      // paying the creator's floor is always allowed (no floor/cap deadlock)
+      return Math.max(base, effFloor());
     }
 
     /* ---- buy box elements ---- */
@@ -113,6 +116,8 @@
       var remaining = card.supply - card.sold;
       var soldOut = card.sold >= card.supply;
       var onboarded = !!card.onboarded;
+      // In real mode, unreviewed cards silently 409 at checkout — surface that here.
+      var pendingReview = (mode === 'real' && !card.reviewed && !soldOut);
 
       view.set({
         name: card.name, tagline: card.tagline, photo: card.photo,
@@ -127,9 +132,13 @@
       M.byId('st-left').textContent = remaining + ' / ' + card.supply;
 
       M.byId('soldout').hidden = !soldOut;
-      M.byId('buybox').hidden = !(onboarded && !soldOut);
-      M.byId('nfs').hidden = !(!onboarded && !soldOut);
-      if (!onboarded && !soldOut) {
+      M.byId('pending-review').hidden = !pendingReview;
+      if (pendingReview && manageKey) {
+        M.byId('pending-review-fine').textContent = 'Your card is waiting for photo review. Once approved, the BUY button goes live.';
+      }
+      M.byId('buybox').hidden = !(onboarded && !soldOut && !pendingReview);
+      M.byId('nfs').hidden = !(!onboarded && !soldOut && !pendingReview);
+      if (!onboarded && !soldOut && !pendingReview) {
         M.byId('nfs-fine').textContent = manageKey
           ? 'Payouts aren\'t connected, so the BUY button is off and shares lead to a dead end. Hit SELL FOR REAL below to finish setup.'
           : 'The owner hasn\'t connected payouts yet, so this card can\'t take money. Check back — or mint your own.';
@@ -175,8 +184,13 @@
       actions.textContent = '';
 
       if (card.onboarded) {
-        status.textContent = '✓ LISTED FOR REAL SALE';
-        status.className = 'own-status ok';
+        if (mode === 'real' && !card.reviewed) {
+          status.textContent = '⏳ LISTED — pending photo review';
+          status.className = 'own-status wait';
+        } else {
+          status.textContent = '✓ LISTED FOR REAL SALE';
+          status.className = 'own-status ok';
+        }
       } else {
         status.textContent = 'NOT LISTED — buyers can’t pay yet';
         status.className = 'own-status no';
@@ -303,6 +317,11 @@
     /* ---- boot ---- */
     render();
     loadSales();
+    // Fetch mode once; re-render so review gate reflects real vs. demo.
+    M.api('/api/config').then(function (cfg) {
+      var m = cfg && cfg.mode;
+      if (m !== mode) { mode = m; render(); }
+    }).catch(function () {});
     setInterval(function () {
       if (!document.hidden) { refresh(); loadSales(); }
     }, 5000);

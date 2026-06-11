@@ -1007,6 +1007,7 @@ input[type=range].dial {
 .own-status { font: 500 13px var(--sans); letter-spacing: -.01em; margin: 0 0 10px; }
 .own-status.ok { color: var(--green); }
 .own-status.no { color: var(--text-2); }
+.own-status.wait { color: var(--gold); }
 
 .notfound, .stale-box {
   text-align: center;
