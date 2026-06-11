@@ -66,7 +66,12 @@
     M.byId('serial').textContent = M.fmtSerial(sale.serial, card.supply);
     M.byId('paid-line').textContent =
       'You paid ' + M.fmtUSD(sale.amount_cents) + ' for ' + card.name +
-      ' — copy ' + M.fmtSerial(sale.serial, card.supply) + '. The card is worth what you paid. Congratulations, probably.';
+      ' — copy ' + M.fmtSerial(sale.serial, card.supply) + '. Numbered, witnessed, final. Congratulations, probably.';
+
+    /* mint CTAs from a success page carry attribution back to this card */
+    document.querySelectorAll('a[href="/#builder"]').forEach(function (a) {
+      a.href = '/?via=' + card.id + '#builder';
+    });
 
     var view = M.createCard({});
     M.byId('card-stage').appendChild(view.el);

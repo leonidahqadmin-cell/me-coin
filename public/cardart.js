@@ -11,15 +11,24 @@
   var M = window.MECOIN = window.MECOIN || {};
 
   /* ---- constants (mirror of src/constants.js) ---- */
-  M.AMOUNT_MIN_CENTS = 50;
+  M.AMOUNT_MIN_CENTS = 100;
   M.AMOUNT_MAX_CENTS = 99999999;
+  M.LAUNCH_PRICE_CAP_CENTS = 50000;
+  M.YOUNG_CARD_CAP_CENTS = 10000;
+  M.YOUNG_CARD_MS = 7 * 86400000;
   M.SUPPLY_MIN = 1;
   M.SUPPLY_MAX = 1000;
   M.NAME_MAX = 40;
   M.TAGLINE_MAX = 100;
   M.REASON_MAX = 300;
   M.PHOTO_MAX_CHARS = 512000;
+  M.OG_MAX_CHARS = 307200;
   M.QUICK_CHIPS_CENTS = [100, 500, 2000];
+
+  /* additive platform fee: $0.30 + 10%, never above the amount */
+  M.feeCents = function (amountCents) {
+    return Math.min(amountCents, 30 + Math.round(amountCents * 0.10));
+  };
 
   M.REDUCED = !!(window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -633,6 +642,125 @@
       ctx.fillText('ME COIN — Certificate of Self-Worth', W / 2, H - 24);
 
       return canvas;
+    });
+  };
+
+  /* ================= OG unfurl renderer (1200×630 landscape) =================
+     Shares should look like a trading card, not a raw selfie.
+     data: { name, tagline, photo, supply, floor_cents } -> Promise<dataURL|null> */
+  M.renderOgJPEG = function (data) {
+    var W = 1200, H = 630;
+    var canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    var ctx = canvas.getContext('2d');
+
+    var fontsReady = Promise.resolve();
+    if (document.fonts && document.fonts.load) {
+      fontsReady = Promise.all([
+        document.fonts.load('700 76px "Inter"'),
+        document.fonts.load('400 30px "Inter"'),
+        document.fonts.load('600 26px "Inter"')
+      ]).catch(function () {});
+    }
+
+    return Promise.all([fontsReady, loadImage(data.photo)]).then(function (res) {
+      var photo = res[1];
+      var name = String(data.name || 'YOUR NAME');
+      var tagline = String(data.tagline || '');
+      var supply = data.supply || 1;
+
+      /* background */
+      ctx.fillStyle = '#0a0a0b';
+      ctx.fillRect(0, 0, W, H);
+
+      /* gold strip along the top */
+      var mGrad = ctx.createLinearGradient(0, 0, W, 0);
+      mGrad.addColorStop(0,    '#5a5a5a');
+      mGrad.addColorStop(0.18, '#c8a462');
+      mGrad.addColorStop(0.34, '#e8d9b0');
+      mGrad.addColorStop(0.50, '#c8a462');
+      mGrad.addColorStop(0.66, '#9a8060');
+      mGrad.addColorStop(0.82, '#c8a462');
+      mGrad.addColorStop(1,    '#5a5a5a');
+      ctx.fillStyle = mGrad;
+      ctx.fillRect(0, 0, W, 14);
+
+      /* card art on the left — 5:7 mini-card with strip + photo */
+      var cardX = 56, cardY = 54, cardW = 372, cardH = 521;
+      ctx.save();
+      roundRectPath(ctx, cardX, cardY, cardW, cardH, 14);
+      ctx.clip();
+      ctx.fillStyle = '#111114';
+      ctx.fillRect(cardX, cardY, cardW, cardH);
+      if (photo) drawCover(ctx, photo, cardX, cardY, cardW, cardH);
+      var fade = ctx.createLinearGradient(0, cardY + cardH * 0.55, 0, cardY + cardH);
+      fade.addColorStop(0, 'rgba(13,13,16,0)');
+      fade.addColorStop(1, 'rgba(13,13,16,0.92)');
+      ctx.fillStyle = fade;
+      ctx.fillRect(cardX, cardY, cardW, cardH);
+      ctx.fillStyle = mGrad;
+      ctx.fillRect(cardX, cardY, cardW, 12);
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+      ctx.lineWidth = 1.5;
+      roundRectPath(ctx, cardX, cardY, cardW, cardH, 14);
+      ctx.stroke();
+
+      /* supply badge on the mini-card */
+      ctx.font = '600 22px "Inter", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      var badge = '/ ' + supply;
+      var bw = ctx.measureText(badge).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.72)';
+      roundRectPath(ctx, cardX + cardW - bw - 44, cardY + 28, bw + 26, 36, 4);
+      ctx.fill();
+      ctx.fillStyle = '#c8a462';
+      ctx.fillText(badge, cardX + cardW - bw - 31, cardY + 53);
+
+      /* text block on the right */
+      var tx = 490;
+      ctx.fillStyle = '#71717a';
+      ctx.font = '600 24px "Inter", sans-serif';
+      ctx.fillText('ME COIN — NUMBERED HUMAN, LIMITED RUN', tx, 130);
+
+      ctx.fillStyle = '#fafaf9';
+      var size = 84;
+      while (size > 34) {
+        ctx.font = '700 ' + size + 'px "Inter", sans-serif';
+        if (ctx.measureText(name).width <= W - tx - 56) break;
+        size -= 4;
+      }
+      ctx.fillText(name, tx, 150 + size);
+
+      if (tagline) {
+        ctx.font = '400 30px "Inter", sans-serif';
+        ctx.fillStyle = 'rgba(250,250,249,0.66)';
+        var lines = wrapTwoLines(ctx, tagline, W - tx - 56);
+        for (var li = 0; li < lines.length; li++) {
+          ctx.fillText(lines[li], tx, 196 + size + li * 42);
+        }
+      }
+
+      /* floor + supply row */
+      var rowY = 470;
+      ctx.font = '500 22px "Inter", sans-serif';
+      ctx.fillStyle = '#71717a';
+      ctx.fillText('FLOOR', tx, rowY);
+      ctx.fillText('SUPPLY', tx + 260, rowY);
+      ctx.font = '700 44px "Inter", sans-serif';
+      ctx.fillStyle = '#c8a462';
+      ctx.fillText(data.floor_cents != null ? M.fmtUSD(data.floor_cents) : '—', tx, rowY + 52);
+      ctx.fillStyle = '#fafaf9';
+      ctx.fillText(String(supply) + ' copies', tx + 260, rowY + 52);
+
+      ctx.font = '400 20px "Inter", sans-serif';
+      ctx.fillStyle = 'rgba(113,113,122,0.8)';
+      ctx.fillText('name your price — floor or above', tx, rowY + 96);
+
+      var out = canvas.toDataURL('image/jpeg', 0.82);
+      if (out.length > M.OG_MAX_CHARS) out = canvas.toDataURL('image/jpeg', 0.6);
+      return out.length <= M.OG_MAX_CHARS ? out : null;
     });
   };
 

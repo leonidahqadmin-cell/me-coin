@@ -17,7 +17,7 @@
   <a class="logo" href="/">ME&nbsp;<b>COIN</b><span class="logo-tm">TM</span></a>
   <nav>
     <a href="#builder">MINT</a>
-    <a href="#sim">SIM MARKET</a>
+    <a href="#gallery-sec">FRESH MINTS</a>
     <a href="/rules">RULES</a>
   </nav>
 </header>
@@ -30,7 +30,7 @@
     <p class="hero-sub">
       Turn yourself into a limited-run trading card. Set the supply and your <b>floor price</b>.
       Share the link. Buyers pay <b>floor or above</b> — real money, named by them.
-      The card is worth what someone paid for it.
+      Every copy is numbered. Supply never changes.
     </p>
     <div class="hero-cta-row">
       <a class="btn" href="#builder">START THE PRESS</a>
@@ -40,13 +40,13 @@
   <div class="marquee" aria-hidden="true">
     <div class="marquee-track">
       <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">✕</span>
-      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">✕</span>
+      <span>EVERY COPY IS NUMBERED — FOREVER</span><span class="mq-x">✕</span>
       <span>YOU SET THE FLOOR — BUYERS GO ABOVE IT</span><span class="mq-x">·</span>
-      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">·</span>
+      <span>SUPPLY IS FIXED AT MINT — NO REPRINTS</span><span class="mq-x">·</span>
       <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">·</span>
-      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">·</span>
+      <span>EVERY COPY IS NUMBERED — FOREVER</span><span class="mq-x">·</span>
       <span>YOU SET THE FLOOR — BUYERS GO ABOVE IT</span><span class="mq-x">·</span>
-      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">·</span>
+      <span>SUPPLY IS FIXED AT MINT — NO REPRINTS</span><span class="mq-x">·</span>
     </div>
   </div>
 </section>
@@ -61,9 +61,9 @@
           <div id="card-stage"></div>
           <p class="preview-hint">hover to inspect — click to flip</p>
           <div class="vpc-box panel">
-            <span class="label">SIM value per card</span>
-            <span id="vpc" class="big-num acid">$10,000.00</span>
-            <p class="fine">= $1,000,000 imaginary pool ÷ your supply. Simulated. Obviously.</p>
+            <span class="label">You receive per floor-price sale</span>
+            <span id="net-read" class="big-num acid">$8.70</span>
+            <p class="fine">After the 10% + 30¢ platform fee. Buyers can always pay more — you keep 90% of every dollar above.</p>
           </div>
         </div>
       </div>
@@ -87,7 +87,7 @@
           </div>
           <label class="dropzone" id="dropzone" for="photo">
             <span class="dz-big">Drop a photo</span>
-            <span class="dz-small">or click — JPG / PNG / WebP, auto-pressed to ≤700px foil-grade JPEG</span>
+            <span class="dz-small">or click — JPG / PNG / WebP, auto-pressed to a ≤700px card-ready JPEG</span>
           </label>
           <input type="file" id="photo" accept="image/*" hidden>
         </div>
@@ -121,16 +121,23 @@
             <span class="floor-prefix">$</span>
             <input class="tin" id="floor" value="10" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="10.00" aria-describedby="floor-help">
           </div>
-          <p class="fine" id="floor-help">Minimum buyers must pay. They can go higher — you set the floor.</p>
+          <p class="fine" id="floor-help">Minimum buyers must pay ($1.00 – $500). They can go higher — you set the floor.</p>
         </div>
 
         <div class="field">
           <div class="field-head">
-            <label for="simprice">Sim asking price</label>
-            <span class="field-meta cyan" id="simprice-read">$10.00</span>
+            <label>Who is on this card?</label>
           </div>
-          <input class="tin" id="simprice" value="10" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="simprice-help">
-          <p class="fine" id="simprice-help">PRETEND MONEY for the sim market below. $0.01 – $10T. Suffixes work: 4.2K, 69M, 1T.</p>
+          <div class="att-row" role="radiogroup" aria-label="Who is on this card">
+            <label class="att-opt"><input type="radio" name="att" value="self" checked> This is me</label>
+            <label class="att-opt"><input type="radio" name="att" value="parody"> Parody</label>
+            <label class="att-opt"><input type="radio" name="att" value="tribute"> Fan tribute</label>
+          </div>
+          <label class="att-check">
+            <input type="checkbox" id="adult-check">
+            <span>I am 18 or older, and the person on this card is 18 or older.</span>
+          </label>
+          <p class="fine">Parody and tribute cards carry a visible badge. Impersonation gets pulled — see the <a href="/rules">rules</a>.</p>
         </div>
 
         <button class="btn btn-huge" id="mint-btn">MINT ME — IT'S FREE</button>
@@ -139,30 +146,6 @@
       </div>
 
     </div>
-  </div>
-</section>
-
-<!-- ============ SIM MARKET ============ -->
-<section class="sim-sec" id="sim">
-  <div class="wrap">
-    <div class="sim-head">
-      <h2 class="sec-title">Sim Market</h2>
-      <span class="sim-badge">SIMULATION — THESE PEOPLE ARE NOT REAL</span>
-    </div>
-    <div class="sim-stats">
-      <div class="stat"><span class="label">Sim supply left</span><span class="val" id="sim-left">100</span></div>
-      <div class="stat"><span class="label">Sim total raised</span><span class="val acid" id="sim-raised">$0.00</span></div>
-      <div class="stat"><span class="label">Asking (sim)</span><span class="val cyan" id="sim-price">$10.00</span></div>
-      <div class="stat"><span class="label">Crowd mood</span><span class="val" id="sim-mood">—</span></div>
-    </div>
-    <div class="feed-box panel">
-      <div class="feed-head">
-        <span class="label">live(ish) order flow — 0% real</span>
-        <span class="live-dot" aria-hidden="true"></span>
-      </div>
-      <div id="sim-feed" class="feed" aria-live="off"></div>
-    </div>
-    <p class="fine">The sim market reacts to your asking price vs. the $1,000,000 ÷ supply "fair value". Price it cheap → frenzy. Price it greedy → mockery. None of it is real and none of these people exist.</p>
   </div>
 </section>
 

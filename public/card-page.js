@@ -29,24 +29,49 @@
     /* ---- header text (textContent only — never innerHTML with user data) ---- */
     M.byId('cp-kicker').textContent = '/// CARD ' + card.id.toUpperCase();
     M.byId('cp-name').textContent = card.name;
+    if (card.attestation && card.attestation !== 'self') {
+      M.byId('cp-name').appendChild(
+        M.el('span', 'att-badge', card.attestation === 'parody' ? 'PARODY' : 'FAN TRIBUTE')
+      );
+    }
     var tagEl = M.byId('cp-tagline');
     if (card.tagline) { tagEl.textContent = '“' + card.tagline + '”'; }
     else { tagEl.hidden = true; }
+
+    /* every mint CTA on this page carries attribution back to this card */
+    document.querySelectorAll('a[href="/#builder"]').forEach(function (a) {
+      a.href = '/?via=' + card.id + '#builder';
+    });
+
+    /* price bounds: creator floor (never under the platform min) and the
+       launch cap ($100/sale while a card is under a week old, $500 after) */
+    function effFloor() {
+      return Math.max(card.price_floor_cents || M.AMOUNT_MIN_CENTS, M.AMOUNT_MIN_CENTS);
+    }
+    function capCents() {
+      return (Date.now() - card.created_at < M.YOUNG_CARD_MS)
+        ? M.YOUNG_CARD_CAP_CENTS : M.LAUNCH_PRICE_CAP_CENTS;
+    }
 
     /* ---- buy box elements ---- */
     var amtIn = M.byId('amt');
     var buyBtn = M.byId('buy-btn');
     var buyErr = M.byId('buy-err');
 
-    /* quick-price chips (floor / 2× / 5×) + CUSTOM */
+    /* quick-price chips (floor / 2× / 5×, clamped to the cap) + CUSTOM */
     var chipsEl = M.byId('chips');
-    [card.price_floor_cents, card.price_floor_cents * 2, card.price_floor_cents * 5].forEach(function (cents) {
+    var chipSeen = {};
+    [effFloor(), effFloor() * 2, effFloor() * 5].forEach(function (cents) {
+      cents = Math.min(cents, capCents());
+      if (chipSeen[cents]) return;
+      chipSeen[cents] = true;
       var b = M.el('button', 'chip', M.fmtUSD(cents));
       b.type = 'button';
       b.addEventListener('click', function () {
         amtIn.value = String(cents / 100);
         markChip(b);
         clearBuyErr();
+        renderNetLine();
       });
       chipsEl.appendChild(b);
     });
@@ -64,10 +89,24 @@
       var all = chipsEl.querySelectorAll('.chip');
       for (var i = 0; i < all.length; i++) all[i].classList.toggle('sel', all[i] === active);
     }
-    amtIn.addEventListener('input', function () { markChip(null); clearBuyErr(); });
+    amtIn.addEventListener('input', function () { markChip(null); clearBuyErr(); renderNetLine(); });
 
     function showBuyErr(msg) { buyErr.textContent = msg; buyErr.hidden = false; }
     function clearBuyErr() { buyErr.hidden = true; }
+
+    /* live fee transparency under the amount field */
+    function renderNetLine() {
+      var fine = M.byId('buy-fine');
+      var base = 'Pay the floor (' + M.fmtUSD(effFloor()) + ') or more — launch cap ' + M.fmtUSD(capCents()) + ' per sale.';
+      var dollars = parseFloat(String(amtIn.value).replace(/[$,\s]/g, ''));
+      if (isFinite(dollars) && dollars > 0) {
+        var cents = Math.round(dollars * 100);
+        if (cents >= effFloor() && cents <= capCents()) {
+          base += ' ' + card.name + ' receives ' + M.fmtUSD(cents - M.feeCents(cents)) + ' of this.';
+        }
+      }
+      fine.textContent = base;
+    }
 
     /* ---- render state from `card` ---- */
     function render() {
@@ -90,6 +129,12 @@
       M.byId('soldout').hidden = !soldOut;
       M.byId('buybox').hidden = !(onboarded && !soldOut);
       M.byId('nfs').hidden = !(!onboarded && !soldOut);
+      if (!onboarded && !soldOut) {
+        M.byId('nfs-fine').textContent = manageKey
+          ? 'Payouts aren\'t connected, so the BUY button is off and shares lead to a dead end. Hit SELL FOR REAL below to finish setup.'
+          : 'The owner hasn\'t connected payouts yet, so this card can\'t take money. Check back — or mint your own.';
+      }
+      renderNetLine();
 
       if (manageKey) renderOwner();
     }
@@ -105,8 +150,8 @@
         return;
       }
       var cents = Math.round(dollars * 100);
-      if (cents < card.price_floor_cents) { showBuyErr('minimum is ' + M.fmtUSD(card.price_floor_cents) + ' — that\'s the floor the creator set.'); return; }
-      if (cents > M.AMOUNT_MAX_CENTS) { showBuyErr('ceiling is $999,999.99. dream slightly smaller.'); return; }
+      if (cents < effFloor()) { showBuyErr('minimum is ' + M.fmtUSD(effFloor()) + ' — that\'s the floor the creator set.'); return; }
+      if (cents > capCents()) { showBuyErr('launch cap is ' + M.fmtUSD(capCents()) + ' per sale' + (capCents() === M.YOUNG_CARD_CAP_CENTS ? ' while a card is under a week old.' : '.')); return; }
 
       buyBtn.disabled = true;
       buyBtn.textContent = 'OPENING CHECKOUT…';

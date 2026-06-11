@@ -726,6 +726,49 @@ input[type=range].dial {
 .floor-row { display: flex; align-items: center; gap: 10px; }
 .floor-row .tin { flex: 1; }
 
+/* attestation controls */
+.att-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.att-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-hi);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 9px 14px;
+  font: 500 13px var(--sans);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color .12s ease, color .12s ease;
+}
+.att-opt:hover { border-color: var(--text-3); color: var(--text); }
+.att-opt:has(input:checked) { border-color: var(--gold); color: var(--text); background: var(--surface-hi); }
+.att-opt input { accent-color: var(--gold); margin: 0; }
+.att-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font: 400 13px/1.5 var(--sans);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.att-check input { accent-color: var(--gold); margin-top: 2px; flex: 0 0 auto; }
+
+/* parody / tribute disclosure badge */
+.att-badge {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 12px;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  font: 600 11px var(--sans);
+  letter-spacing: .06em;
+  padding: 4px 9px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* sim market */
 .sim-sec {
   background: var(--surface);

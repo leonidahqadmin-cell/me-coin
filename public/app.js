@@ -1,16 +1,15 @@
 /* ============================================================
    ME COIN — app.js (home / builder page)
-   The card builder, photo press, scarcity dial, the SIM MARKET
-   game loop (band rules per SPEC), mint flow, recent gallery.
+   The card builder: photo press, scarcity dial, floor price +
+   net-payout math, attestations, mint flow (with OG unfurl
+   render + ?via attribution + immediate payout onboarding),
+   and the recent gallery.
    Requires cardart.js (window.MECOIN).
    ============================================================ */
 (function () {
   'use strict';
 
   var M = window.MECOIN;
-  var SIM_POOL = 1000000;          /* $1,000,000 imaginary pie */
-  var SIM_PRICE_MIN = 0.01;
-  var SIM_PRICE_MAX = 1e13;        /* $10T */
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -25,22 +24,16 @@
     var dropzone = M.byId('dropzone');
     var supplyIn = M.byId('supply');
     var supplyNum = M.byId('supply-num');
-    var priceIn = M.byId('simprice');
-    var priceRead = M.byId('simprice-read');
     var mintBtn = M.byId('mint-btn');
     var mintErr = M.byId('mint-err');
-    var feedEl = M.byId('sim-feed');
-    var moodEl = M.byId('sim-mood');
-    var simPriceEl = M.byId('sim-price');
     var floorIn = M.byId('floor');
     var floorRead = M.byId('floor-read');
+    var adultCheck = M.byId('adult-check');
 
     var card = M.createCard({});
     M.byId('card-stage').appendChild(card.el);
 
-    var vpcRoll = M.makeRoller(M.byId('vpc'));
-    var leftRoll = M.makeRoller(M.byId('sim-left'));
-    var raisedRoll = M.makeRoller(M.byId('sim-raised'));
+    var netRoll = M.makeRoller(M.byId('net-read'));
 
     /* ---------- state ---------- */
     var state = {
@@ -48,9 +41,12 @@
       tagline: '',
       photo: null,
       supply: 100,
-      simPrice: 10,
       floorCents: 1000
     };
+
+    /* ?via=<card_id> — referral attribution for measurable share chains */
+    var via = new URLSearchParams(location.search).get('via');
+    if (!(typeof via === 'string' && /^[a-z0-9]{10}$/.test(via))) via = null;
 
     function renderCard() {
       card.set({
@@ -58,16 +54,9 @@
         tagline: state.tagline || 'limited. like my patience.',
         photo: state.photo,
         supply: state.supply,
-        serial: null
+        serial: null,
+        stats: { floor_cents: state.floorCents }
       });
-    }
-
-    function vpcCents() {
-      return Math.round((SIM_POOL / state.supply) * 100);
-    }
-
-    function renderVpc() {
-      vpcRoll.set(M.fmtUSD(vpcCents()));
     }
 
     /* ---------- name / tagline ---------- */
@@ -140,7 +129,7 @@
       photoMeta.textContent = 'PRESSING…';
       pressPhoto(file).then(function (dataURL) {
         state.photo = dataURL;
-        photoMeta.textContent = Math.round(dataURL.length / 1024) + ' KB FOIL-READY';
+        photoMeta.textContent = Math.round(dataURL.length / 1024) + ' KB PRESS-READY';
         dropzone.classList.add('has-photo');
         hideErr();
         renderCard();
@@ -183,219 +172,32 @@
       if (!fromSlider) supplyIn.value = String(v);
       supplyNum.value = String(v);
       renderCard();
-      renderVpc();
-      simReset(false);
     }
     supplyIn.addEventListener('input', function () { setSupply(supplyIn.value, true); });
     supplyNum.addEventListener('change', function () { setSupply(supplyNum.value, false); });
 
-    /* ---------- sim price ---------- */
-    function parseSimPrice(raw) {
-      var m = String(raw || '').trim()
-        .replace(/^\$/, '').replace(/,/g, '')
-        .match(/^(\d*\.?\d+)\s*([kmbt])?$/i);
-      if (!m) return null;
-      var v = parseFloat(m[1]);
-      var mult = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[(m[2] || '').toLowerCase()] || 1;
-      v *= mult;
-      if (!isFinite(v)) return null;
-      return Math.min(SIM_PRICE_MAX, Math.max(SIM_PRICE_MIN, v));
+    /* ---------- floor price + net payout ---------- */
+    function renderNet() {
+      netRoll.set(M.fmtUSD(state.floorCents - M.feeCents(state.floorCents)));
     }
 
-    function setSimPrice() {
-      var v = parseSimPrice(priceIn.value);
-      if (v === null) {
-        priceRead.textContent = '??? — type a number';
-        return;
-      }
-      state.simPrice = v;
-      priceRead.textContent = M.fmtCompactUSD(v);
-      simPriceEl.textContent = M.fmtCompactUSD(v);
-      renderMood();
-    }
-    priceIn.addEventListener('input', setSimPrice);
-
-    /* ---------- floor price ---------- */
     function setFloor() {
       var raw = String(floorIn.value || '').replace(/[$,\s]/g, '');
       var dollars = parseFloat(raw);
-      if (!isFinite(dollars) || dollars < 0.5) {
-        floorRead.textContent = 'min $0.50';
-        state.floorCents = 50;
+      if (!isFinite(dollars) || dollars < M.AMOUNT_MIN_CENTS / 100) {
+        floorRead.textContent = 'min ' + M.fmtUSD(M.AMOUNT_MIN_CENTS);
+        state.floorCents = M.AMOUNT_MIN_CENTS;
+        renderNet();
+        renderCard();
         return;
       }
-      var cents = Math.min(99999999, Math.max(50, Math.round(dollars * 100)));
+      var cents = Math.min(M.LAUNCH_PRICE_CAP_CENTS, Math.max(M.AMOUNT_MIN_CENTS, Math.round(dollars * 100)));
       state.floorCents = cents;
       floorRead.textContent = M.fmtUSD(cents);
+      renderNet();
+      renderCard();
     }
     floorIn.addEventListener('input', setFloor);
-
-    /* ============================================================
-       SIM MARKET — the game loop (client-side only, 0% real)
-       fair = $1,000,000 / supply ;  r = simPrice / fair
-       r <= 1.5        : frenzy   — frequent buys, hype
-       1.5 < r <= 100  : mixed    — occasional buys, skepticism, lowballs
-       r > 100         : hostile  — near-zero buys, mockery, rare ironic whale
-       ============================================================ */
-    var SIM = { left: 100, raised: 0, timer: null, soldOut: false, started: false };
-
-    var FIRST = ['xX_', '', '', '', 'lil_', 'DJ_', '0x', 'yung_', 'dr_', 'avg_', 'certified_', 'her_majesty_'];
-    var CORE = ['HODLgoblin', 'moonrat', 'gasfee', 'rugwatch', 'fomo', 'alphaleak', 'degen',
-      'bagholder', 'candlestick', 'wagmi', 'apefather', 'shrimp', 'whalebait', 'pumpkin',
-      'chartgazer', 'liquidity', 'mintcondition', 'foilhunter', 'slabber', 'breakroom'];
-    var LAST = ['_69', '420', '_eth', '2000', '_irl', 'XL', '_dao', '9000', '.exe', '_Xx', '', '', '_jr'];
-
-    function fakeUser() {
-      return FIRST[(Math.random() * FIRST.length) | 0] +
-        CORE[(Math.random() * CORE.length) | 0] +
-        LAST[(Math.random() * LAST.length) | 0];
-    }
-
-    var HYPE_CHATTER = [
-      '"this is the floor. SCREENSHOT ME."',
-      '"undervalued. generationally."',
-      '"I was early. you will all see."',
-      '"fair value is a myth but this is below it"',
-      '"told my group chat. they\'re coming."',
-      '"do NOT tell my wife about this one"',
-      '"set it as my phone wallpaper already"',
-      '"the supply dial alone is worth the price"'
-    ];
-    var MIXED_CHATTER = [
-      '"at {p}? in this economy?"',
-      'offers $0.03 — offer ignored',
-      '"I\'d pay half that, and I\'m being generous"',
-      'is "watching the chart" (there is no chart)',
-      '"hmm. hmmmm. hm."',
-      'lowballs: "{p}? I\'ll give you a firm handshake"',
-      'added to cart. removed from cart. added again.',
-      '"need to ask my financial advisor (my cat)"'
-    ];
-    var MOCK_CHATTER = [
-      '"{p}??? for a JPEG of a PERSON???"',
-      'screenshotted this for the group chat',
-      '"sir, this is not the Louvre"',
-      'laughed in 4 currencies',
-      '"the audacity IS the product at this point"',
-      'reported this to the imaginary SEC',
-      '"I\'ve seen confidence. THIS is performance art."',
-      '"my landlord wants {p} too. he\'s also dreaming."'
-    ];
-    var HYPE_BUYS = [
-      'bought {q} without reading anything',
-      'market-bought {q} — "thank me later"',
-      'bought {q}. hands: diamond. plan: none.',
-      'swept {q} off the floor',
-      'bought {q} "for the culture"'
-    ];
-    var MIXED_BUYS = [
-      'bought 1 — "don\'t make it weird"',
-      'caved and bought 1 after 20 minutes of hovering',
-      'bought 1 "as a joke" (the receipt is real)',
-      'bought 1 to win an argument'
-    ];
-    var WHALE_BUYS = [
-      '(whale) bought 1 "ironically" — the money was real to them',
-      '(whale) bought 1. did not blink. did not explain.'
-    ];
-
-    function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
-    function fill(t, q) {
-      return t.replace('{p}', M.fmtCompactUSD(state.simPrice)).replace('{q}', String(q || 1));
-    }
-
-    function bandOf() {
-      var r = state.simPrice / (SIM_POOL / state.supply);
-      if (r <= 1.5) return 'hype';
-      if (r <= 100) return 'mixed';
-      return 'mock';
-    }
-
-    function renderMood() {
-      var b = bandOf();
-      moodEl.textContent = b === 'hype' ? 'FRENZY' : b === 'mixed' ? 'SUSPICIOUS' : 'OPENLY HOSTILE';
-      moodEl.className = 'val ' + (b === 'hype' ? 'acid' : b === 'mixed' ? 'cyan' : 'heat');
-    }
-
-    function renderSimStats() {
-      leftRoll.set(String(SIM.left));
-      var raised = SIM.raised;
-      raisedRoll.set(raised >= 1e6 ? M.fmtCompactUSD(raised) : M.fmtUSD(Math.round(raised * 100)));
-    }
-
-    function simReset(announce) {
-      SIM.left = state.supply;
-      SIM.raised = 0;
-      SIM.soldOut = false;
-      card.setSoldOut(false);
-      renderSimStats();
-      renderMood();
-      if (announce) {
-        M.feedLine(feedEl, {
-          tag: 'PRESS', cls: 'sys',
-          text: 'NEW SIM BATCH PRESSED — ' + state.supply + ' UNITS AT ' + M.fmtCompactUSD(state.simPrice)
-        });
-      }
-    }
-
-    function schedule() {
-      clearTimeout(SIM.timer);
-      var b = bandOf();
-      var range = b === 'hype' ? [700, 1700] : b === 'mixed' ? [1400, 3200] : [1900, 4200];
-      SIM.timer = setTimeout(tick, range[0] + Math.random() * (range[1] - range[0]));
-    }
-
-    function tick() {
-      if (document.hidden || SIM.soldOut) { schedule(); return; }
-      var b = bandOf();
-      var buyP = b === 'hype' ? 0.78 : b === 'mixed' ? 0.22 : 0.03;
-      if (Math.random() < buyP && SIM.left > 0) {
-        simBuy(b);
-      } else {
-        var pool = b === 'hype' ? HYPE_CHATTER : b === 'mixed' ? MIXED_CHATTER : MOCK_CHATTER;
-        M.feedLine(feedEl, {
-          tag: fakeUser(),
-          cls: b === 'mock' ? 'mock' : '',
-          text: fill(pick(pool))
-        });
-      }
-      schedule();
-    }
-
-    function simBuy(b) {
-      var qty = 1;
-      if (b === 'hype' && Math.random() < 0.4) qty = 1 + ((Math.random() * 3) | 0);
-      qty = Math.min(qty, SIM.left);
-      SIM.left -= qty;
-      SIM.raised += state.simPrice * qty;
-      var msg = b === 'mock' ? pick(WHALE_BUYS) : b === 'hype' ? pick(HYPE_BUYS) : pick(MIXED_BUYS);
-      M.feedLine(feedEl, {
-        tag: fakeUser(),
-        cls: 'buy',
-        text: fill(msg, qty) + ' — ' + M.fmtCompactUSD(state.simPrice * qty)
-      });
-      renderSimStats();
-      if (SIM.left <= 0) simSoldOut();
-    }
-
-    function simSoldOut() {
-      SIM.soldOut = true;
-      clearTimeout(SIM.timer);
-      card.setSoldOut(true, { label: 'SIM SOLD OUT', slam: true });
-      M.feedLine(feedEl, {
-        tag: 'MARKET', cls: 'sys',
-        text: 'SIM SUPPLY EXHAUSTED — ' + state.supply + ' UNITS GONE. TOTAL: ' +
-          M.fmtCompactUSD(SIM.raised) + '. THE HALLUCINATION HELD.'
-      });
-      setTimeout(function () {
-        simReset(true);
-        schedule();
-      }, 4200);
-    }
-
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden && SIM.started) schedule();
-    });
 
     /* ---------- mint ---------- */
     function showErr(msg) {
@@ -404,43 +206,72 @@
     }
     function hideErr() { mintErr.hidden = true; }
 
+    function attestation() {
+      var checked = document.querySelector('input[name="att"]:checked');
+      return checked ? checked.value : 'self';
+    }
+
     mintBtn.addEventListener('click', function () {
       hideErr();
       var name = state.name.trim();
       if (!name) { showErr('the card needs a name. yours, ideally.'); nameIn.focus(); return; }
       if (name.length > M.NAME_MAX) { showErr('name caps at ' + M.NAME_MAX + ' characters.'); return; }
-      if (!state.photo) { showErr('no asset loaded. upload your face — the foil needs something to shine on.'); return; }
+      if (!state.photo) { showErr('no asset loaded. upload your face — the card needs something to shine on.'); return; }
       var tagline = state.tagline.trim().slice(0, M.TAGLINE_MAX);
       if (!(state.supply >= M.SUPPLY_MIN && state.supply <= M.SUPPLY_MAX)) {
         showErr('supply must be 1–1000.');
         return;
       }
       var floorCents = state.floorCents;
-      if (!floorCents || floorCents < 50 || floorCents > 99999999) {
-        showErr('floor price must be at least $0.50.');
+      if (!floorCents || floorCents < M.AMOUNT_MIN_CENTS || floorCents > M.LAUNCH_PRICE_CAP_CENTS) {
+        showErr('floor price must be between ' + M.fmtUSD(M.AMOUNT_MIN_CENTS) + ' and ' + M.fmtUSD(M.LAUNCH_PRICE_CAP_CENTS) + '.');
         floorIn.focus();
+        return;
+      }
+      if (!adultCheck.checked) {
+        showErr('confirm the 18+ box — no minors on cards, no exceptions.');
         return;
       }
 
       mintBtn.disabled = true;
-      mintBtn.textContent = 'PRESSING THE FOIL…';
-      M.post('/api/cards', {
-        name: name,
-        tagline: tagline,
-        photo: state.photo,
-        supply: state.supply,
-        price_floor_cents: floorCents
+      mintBtn.textContent = 'PRESSING…';
+
+      /* render the social unfurl image first so shares look like a card,
+         not a raw selfie — failure is non-fatal (server falls back). */
+      M.renderOgJPEG({
+        name: name, tagline: tagline, photo: state.photo,
+        supply: state.supply, floor_cents: floorCents
+      }).catch(function () { return null; }).then(function (ogDataURL) {
+        var body = {
+          name: name,
+          tagline: tagline,
+          photo: state.photo,
+          supply: state.supply,
+          price_floor_cents: floorCents,
+          attestation: attestation(),
+          adult_attested: true
+        };
+        if (ogDataURL && ogDataURL.length <= M.OG_MAX_CHARS) body.og_image = ogDataURL;
+        if (via) body.referred_by = via;
+        return M.post('/api/cards', body);
       }).then(function (r) {
         M.saveKey(r.id, r.manage_key, name);
-        mintBtn.textContent = 'MINTED. REDIRECTING…';
-        location.href = '/c/' + r.id;
+        mintBtn.textContent = 'MINTED. SETTING UP PAYOUTS…';
+        /* dead-share fix: connect payouts BEFORE the link gets shared.
+           Demo mode onboards instantly; real mode goes to Stripe first. */
+        return M.post('/api/onboard', { card_id: r.id, manage_key: r.manage_key })
+          .then(function (o) {
+            if (o && o.status === 'redirect' && o.url) { location.href = o.url; return; }
+            location.href = '/c/' + r.id;
+          })
+          .catch(function () { location.href = '/c/' + r.id; });
       }).catch(function (err) {
         mintBtn.disabled = false;
         mintBtn.textContent = "MINT ME — IT'S FREE";
-        if (err.status === 429) {
+        if (err && err.status === 429) {
           showErr('Easy, machine. ' + err.message + ' — even scarcity needs scarcity.');
         } else {
-          showErr(err.message || 'mint failed. the press jammed. try again.');
+          showErr((err && err.message) || 'mint failed. the press jammed. try again.');
         }
       });
     });
@@ -485,16 +316,7 @@
     nameCount.textContent = '0/' + M.NAME_MAX;
     tagCount.textContent = '0/' + M.TAGLINE_MAX;
     renderCard();
-    renderVpc();
-    setSimPrice();
     setFloor();
-    simReset(false);
-    M.feedLine(feedEl, {
-      tag: 'MARKET', cls: 'sys', quiet: true,
-      text: 'SIM MARKET OPEN — these people are not real. the math is.'
-    });
-    SIM.started = true;
-    schedule();
     loadGallery();
   }
 })();
