@@ -1,9 +1,8 @@
 /* ============================================================
    ME COIN — cardart.js
-   Shared kit: constants, helpers, API wrapper, demo-mode banner,
-   the holo flip-card builder (tilt + flip + foil shimmer),
-   rolling-digit counters, feed lines, confetti, and the
-   600x840 @2x canvas PNG card renderer.
+   Shared kit: constants, helpers, API wrapper, demo banner,
+   clean flip-card builder (tilt + flip), rolling counters,
+   feed lines, confetti, and canvas PNG renderer.
    Plain script — defines window.MECOIN. No frameworks.
    ============================================================ */
 (function () {
@@ -11,9 +10,9 @@
 
   var M = window.MECOIN = window.MECOIN || {};
 
-  /* ---- shared constants (mirror of src/constants.js, ARCHITECTURE §2) ---- */
-  M.AMOUNT_MIN_CENTS = 50;          /* $0.50 — Stripe hard minimum */
-  M.AMOUNT_MAX_CENTS = 99999999;    /* $999,999.99 */
+  /* ---- constants (mirror of src/constants.js) ---- */
+  M.AMOUNT_MIN_CENTS = 50;
+  M.AMOUNT_MAX_CENTS = 99999999;
   M.SUPPLY_MIN = 1;
   M.SUPPLY_MAX = 1000;
   M.NAME_MAX = 40;
@@ -25,9 +24,9 @@
   M.REDUCED = !!(window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  var HOLO_COLORS = ['#21e6e6', '#ff2d87', '#c8ff00', '#ffd75e', '#21e6e6'];
+  var CONFETTI_COLORS = ['#c8a462', '#e8e8e8', '#34d399', '#60a5fa', '#f59e0b'];
 
-  /* ================= tiny DOM helpers ================= */
+  /* ================= DOM helpers ================= */
   M.byId = function (id) { return document.getElementById(id); };
 
   M.el = function (tag, cls, text) {
@@ -45,7 +44,6 @@
     });
   };
 
-  /* compact sim-money formatter: $0.01 .. $10T -> "$4.20", "$4.2K", "$10T" */
   M.fmtCompactUSD = function (dollars) {
     if (dollars === null || dollars === undefined || isNaN(dollars)) return '—';
     var neg = dollars < 0 ? '-' : '';
@@ -56,14 +54,13 @@
       return s.replace(/\.?0+$/, '');
     }
     if (v >= 1e12) return neg + '$' + trim(v / 1e12) + 'T';
-    if (v >= 1e9) return neg + '$' + trim(v / 1e9) + 'B';
-    if (v >= 1e6) return neg + '$' + trim(v / 1e6) + 'M';
-    if (v >= 1e3) return neg + '$' + trim(v / 1e3) + 'K';
-    if (v >= 100) return neg + '$' + Math.round(v).toLocaleString('en-US');
+    if (v >= 1e9)  return neg + '$' + trim(v / 1e9)  + 'B';
+    if (v >= 1e6)  return neg + '$' + trim(v / 1e6)  + 'M';
+    if (v >= 1e3)  return neg + '$' + trim(v / 1e3)  + 'K';
+    if (v >= 100)  return neg + '$' + Math.round(v).toLocaleString('en-US');
     return neg + '$' + v.toFixed(2);
   };
 
-  /* serial format per ARCHITECTURE §2: #001/100, #0042/1000 */
   M.fmtSerial = function (serial, supply) {
     return '#' + String(serial).padStart(Math.max(3, String(supply).length), '0') +
       '/' + supply;
@@ -89,7 +86,7 @@
     return Math.floor(days / 30) + 'mo ago';
   };
 
-  /* ================= API wrapper (error shape: {"error": "..."}) ================= */
+  /* ================= API wrapper ================= */
   M.api = function (path, opts) {
     return fetch(path, opts).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (body) {
@@ -111,9 +108,7 @@
     });
   };
 
-  /* ================= manage-key storage =================
-     Contract key:   localStorage['mecoin_key_<id>'] = manage_key
-     Convenience:    localStorage['mecoin_cards'] = [{id, manage_key, name}] */
+  /* ================= manage-key storage ================= */
   M.keyFor = function (cardId) {
     try { return localStorage.getItem('mecoin_key_' + cardId); }
     catch (e) { return null; }
@@ -129,10 +124,10 @@
       list = list.filter(function (c) { return c && c.id !== cardId; });
       list.unshift({ id: cardId, manage_key: manageKey, name: String(name || '') });
       localStorage.setItem('mecoin_cards', JSON.stringify(list.slice(0, 50)));
-    } catch (e) { /* private mode etc. — mint still works, owner tools won't */ }
+    } catch (e) {}
   };
 
-  /* ================= demo-mode banner (every page) ================= */
+  /* ================= demo banner ================= */
   M.config = (typeof fetch === 'function')
     ? fetch('/api/config').then(function (r) {
         return r.ok ? r.json() : { mode: null };
@@ -158,8 +153,7 @@
   /* ================= rolling digit counters ================= */
   M.makeRoller = function (host) {
     host.classList.add('roll');
-    var strips = [];
-    var cur = null;
+    var strips = [], cur = null;
 
     function rebuild(str) {
       host.textContent = '';
@@ -186,9 +180,7 @@
       var skel = str.replace(/\d/g, '0');
       if (cur === null || skel !== cur.replace(/\d/g, '0')) rebuild(str);
       for (var i = 0; i < str.length; i++) {
-        if (strips[i]) {
-          strips[i].style.transform = 'translateY(-' + Number(str[i]) + 'em)';
-        }
+        if (strips[i]) strips[i].style.transform = 'translateY(-' + Number(str[i]) + 'em)';
       }
       cur = str;
     }
@@ -210,90 +202,97 @@
     return line;
   };
 
-  /* ================= holo confetti burst ================= */
+  /* ================= confetti burst ================= */
   M.confetti = function (host, n) {
     if (M.REDUCED) return;
-    n = n || 56;
+    n = n || 48;
     for (var i = 0; i < n; i++) {
       var p = M.el('span', 'confetti');
-      p.style.background = HOLO_COLORS[i % HOLO_COLORS.length];
-      p.style.setProperty('--tx', (Math.random() * 520 - 260).toFixed(0) + 'px');
-      p.style.setProperty('--ty', (Math.random() * -480 - 40).toFixed(0) + 'px');
+      p.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+      p.style.setProperty('--tx', (Math.random() * 480 - 240).toFixed(0) + 'px');
+      p.style.setProperty('--ty', (Math.random() * -400 - 40).toFixed(0) + 'px');
       p.style.setProperty('--rot', (Math.random() * 900 - 450).toFixed(0) + 'deg');
       p.style.animationDelay = (Math.random() * 0.12).toFixed(2) + 's';
       host.appendChild(p);
       (function (node) {
-        setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 1700);
+        setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 1500);
       })(p);
     }
   };
 
   /* ================= the flip card =================
      createCard() -> { el, set(data), setSoldOut(on, opts), flip(force) }
-     data: { name, tagline, photo (dataURL|null), supply, serial (int|null) } */
+     data: {
+       name, tagline, photo (dataURL|null), supply,
+       serial (int|null),
+       stats: { floor_cents, avg_paid_cents, high_paid_cents }
+     } */
   M.createCard = function (opts) {
     opts = opts || {};
-    var stage = M.el('div', 'card-stage');
+    var stage = M.el('div', 'mc-card');
     stage.setAttribute('tabindex', '0');
     stage.setAttribute('role', 'button');
     stage.setAttribute('aria-label', 'Trading card. Activate to flip.');
-    var tilt = M.el('div', 'card-tilt');
-    var flip = M.el('div', 'card-flip');
+
+    var tilt = M.el('div', 'mc-tilt');
+    var flip = M.el('div', 'mc-flip');
 
     /* ----- FRONT ----- */
-    var front = M.el('div', 'card-face front');
-    var fcard = M.el('div', 'tcard');
-    fcard.appendChild(M.el('div', 'holo-spin'));
-    var inner = M.el('div', 'tcard-inner');
+    var front = M.el('div', 'mc-face mc-front');
+    var fcard = M.el('div');
 
-    var head = M.el('div', 'tc-head');
-    head.appendChild(M.el('span', 'tc-brand', 'ME COIN'));
-    head.appendChild(M.el('span', 'tc-series', 'LIMITED MINT'));
-    inner.appendChild(head);
+    fcard.appendChild(M.el('div', 'mc-strip'));
 
-    var photoBox = M.el('div', 'tc-photo');
+    var photoBox = M.el('div', 'mc-photo');
     var img = document.createElement('img');
     img.alt = '';
     img.draggable = false;
     img.hidden = true;
-    var phEmpty = M.el('div', 'ph-empty');
-    phEmpty.appendChild(M.el('span', null, 'NO ASSET LOADED'));
-    phEmpty.appendChild(M.el('span', null, '— UPLOAD YOUR FACE —'));
+    var phEl = M.el('div', 'mc-ph');
+    phEl.appendChild(M.el('span', null, 'Upload your photo'));
     photoBox.appendChild(img);
-    photoBox.appendChild(phEmpty);
-    inner.appendChild(photoBox);
+    photoBox.appendChild(phEl);
+    fcard.appendChild(photoBox);
 
-    var nameEl = M.el('div', 'tc-name', 'YOUR NAME');
-    var tagEl = M.el('div', 'tc-tag', '');
-    inner.appendChild(nameEl);
-    inner.appendChild(tagEl);
+    var badgeEl = M.el('div', 'mc-badge', '/ 1');
+    fcard.appendChild(badgeEl);
 
-    var bottom = M.el('div', 'tc-bottom');
-    var supplyChip = M.el('span', 'tc-supply', '1 OF 100');
-    var serialChip = M.el('span', 'holo-chip');
-    var serialText = M.el('span', null, 'UNNUMBERED');
-    serialChip.appendChild(serialText);
-    var seal = M.el('span', 'tc-seal', 'MC');
-    seal.title = 'ME COIN certified hologram';
-    bottom.appendChild(supplyChip);
-    bottom.appendChild(serialChip);
-    bottom.appendChild(seal);
-    inner.appendChild(bottom);
+    var soldEl = M.el('div', 'mc-sold');
+    var stampEl = M.el('div', 'mc-sold-stamp', 'SOLD OUT');
+    soldEl.appendChild(stampEl);
+    fcard.appendChild(soldEl);
 
-    fcard.appendChild(inner);
-    fcard.appendChild(M.el('div', 'tc-shine'));
+    var infoEl = M.el('div', 'mc-info');
+    var nameEl = M.el('div', 'mc-name', 'YOUR NAME');
+    var tagEl = M.el('div', 'mc-tag', '');
+    var statsEl = M.el('div', 'mc-stats');
 
-    var stampLayer = M.el('div', 'stamp-layer');
-    var stamp = M.el('div', 'stamp', 'SOLD OUT');
-    stampLayer.appendChild(stamp);
-    fcard.appendChild(stampLayer);
+    function mkStat(label) {
+      var s = M.el('div', 'mc-stat');
+      s.appendChild(M.el('span', 'mc-stat-l', label));
+      var vEl = M.el('span', 'mc-stat-v', '—');
+      s.appendChild(vEl);
+      return { el: s, v: vEl };
+    }
+    var sFloor = mkStat('FLOOR');
+    var sAvg   = mkStat('AVG');
+    var sHigh  = mkStat('HIGH');
+    statsEl.appendChild(sFloor.el);
+    statsEl.appendChild(sAvg.el);
+    statsEl.appendChild(sHigh.el);
+
+    infoEl.appendChild(nameEl);
+    infoEl.appendChild(tagEl);
+    infoEl.appendChild(statsEl);
+    fcard.appendChild(infoEl);
     front.appendChild(fcard);
 
-    /* ----- BACK: CERTIFICATE OF SELF-WORTH ----- */
-    var back = M.el('div', 'card-face back');
-    var bcard = M.el('div', 'tcard');
-    bcard.appendChild(M.el('div', 'holo-spin'));
-    var binner = M.el('div', 'tc-back-inner');
+    /* ----- BACK: certificate ----- */
+    var back = M.el('div', 'mc-face mc-back');
+    var bcard = M.el('div');
+    bcard.appendChild(M.el('div', 'mc-strip'));
+
+    var binner = M.el('div', 'mc-back-inner');
     binner.appendChild(M.el('div', 'cert-title', 'Certificate of Self-Worth'));
     binner.appendChild(M.el('div', 'cert-sub', 'ME COIN HUMAN ASSET REGISTRY'));
     binner.appendChild(M.el('hr', 'cert-rule'));
@@ -318,16 +317,13 @@
 
     var stampRow = M.el('div', 'cert-stamp-row');
     stampRow.appendChild(M.el('span', 'cert-sig', 'authorized: the self-worth desk'));
-    var seal2 = M.el('span', 'tc-seal', 'MC');
-    stampRow.appendChild(seal2);
+    stampRow.appendChild(M.el('span', 'cert-seal', 'MC'));
     binner.appendChild(stampRow);
-
     binner.appendChild(M.el('div', 'cert-barcode'));
     var certSerial = M.el('div', 'cert-serial', 'MECOIN·UNNUMBERED');
     binner.appendChild(certSerial);
 
     bcard.appendChild(binner);
-    bcard.appendChild(M.el('div', 'tc-shine'));
     back.appendChild(bcard);
 
     flip.appendChild(front);
@@ -335,7 +331,7 @@
     tilt.appendChild(flip);
     stage.appendChild(tilt);
 
-    /* ----- interactivity: flip on click / Enter / Space ----- */
+    /* ----- flip interaction ----- */
     var canFlip = opts.flip !== false;
     function doFlip(force) {
       if (!canFlip) return;
@@ -349,10 +345,9 @@
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doFlip(); }
     });
 
-    /* ----- tilt + foil shimmer (pointer-tracked) ----- */
+    /* ----- tilt on pointer move ----- */
     if (!M.REDUCED && opts.tilt !== false) {
       var raf = 0;
-      var faces = [fcard, bcard];
       stage.addEventListener('pointermove', function (e) {
         var r = stage.getBoundingClientRect();
         if (!r.width || !r.height) return;
@@ -362,32 +357,27 @@
         raf = requestAnimationFrame(function () {
           raf = 0;
           tilt.style.transform =
-            'rotateX(' + ((0.5 - py) * 12).toFixed(2) + 'deg) ' +
-            'rotateY(' + ((px - 0.5) * 16).toFixed(2) + 'deg)';
-          for (var i = 0; i < faces.length; i++) {
-            faces[i].style.setProperty('--mx', (px * 100).toFixed(1) + '%');
-            faces[i].style.setProperty('--my', (py * 100).toFixed(1) + '%');
-          }
+            'rotateX(' + ((0.5 - py) * 10).toFixed(2) + 'deg) ' +
+            'rotateY(' + ((px - 0.5) * 14).toFixed(2) + 'deg)';
         });
       });
-      stage.addEventListener('pointerleave', function () {
-        tilt.style.transform = '';
-      });
+      stage.addEventListener('pointerleave', function () { tilt.style.transform = ''; });
     }
 
-    /* ----- state ----- */
-    var supportsCQ = (window.CSS && CSS.supports && CSS.supports('font-size', '1cqw'));
+    var supportsCQ = !!(window.CSS && CSS.supports && CSS.supports('font-size', '1cqw'));
 
+    /* ----- set(data) ----- */
     function set(data) {
       data = data || {};
       var name = String(data.name || 'YOUR NAME');
       nameEl.textContent = name;
       certName.textContent = name.toUpperCase();
-      /* shrink long names */
-      var L = name.length;
-      var cq = L > 30 ? 3.4 : L > 22 ? 3.9 : L > 15 ? 4.5 : L > 9 ? 5.0 : 5.6;
-      var px = L > 30 ? 13 : L > 22 ? 15 : L > 15 ? 17 : L > 9 ? 19 : 22;
-      nameEl.style.fontSize = supportsCQ ? (cq + 'cqw') : (px + 'px');
+
+      if (supportsCQ) {
+        var L = name.length;
+        var cq = L > 30 ? 3.8 : L > 22 ? 4.6 : L > 15 ? 5.2 : L > 9 ? 5.8 : 6.4;
+        nameEl.style.fontSize = cq + 'cqw';
+      }
 
       tagEl.textContent = String(data.tagline || '');
 
@@ -395,49 +385,53 @@
       if (photo && /^data:image\//.test(photo)) {
         img.src = photo;
         img.hidden = false;
-        phEmpty.style.display = 'none';
+        phEl.style.display = 'none';
       } else {
         img.removeAttribute('src');
         img.hidden = true;
-        phEmpty.style.display = '';
+        phEl.style.display = '';
       }
 
       var supply = data.supply || 1;
-      supplyChip.textContent = '1 OF ' + supply;
       if (data.serial) {
-        serialText.textContent = M.fmtSerial(data.serial, supply);
+        badgeEl.textContent = M.fmtSerial(data.serial, supply);
         certSerial.textContent = 'MECOIN·' + M.fmtSerial(data.serial, supply);
       } else {
-        serialText.textContent = 'UNNUMBERED';
+        badgeEl.textContent = '/ ' + supply;
         certSerial.textContent = 'MECOIN·PROOF·' + supply;
       }
+
+      var st = data.stats || {};
+      sFloor.v.textContent = st.floor_cents  != null ? M.fmtUSD(st.floor_cents)       : '—';
+      sAvg.v.textContent   = st.avg_paid_cents  != null ? M.fmtUSD(st.avg_paid_cents)  : '—';
+      sHigh.v.textContent  = st.high_paid_cents != null ? M.fmtUSD(st.high_paid_cents) : '—';
     }
 
+    /* ----- setSoldOut(on, opts) ----- */
     function setSoldOut(on, o) {
       o = o || {};
-      stamp.textContent = o.label || 'SOLD OUT';
+      stampEl.textContent = o.label || 'SOLD OUT';
       if (on) {
-        stampLayer.classList.add('on');
+        soldEl.classList.add('on');
         if (o.slam && !M.REDUCED) {
-          stamp.classList.remove('slam');
-          /* force reflow so the animation can replay */
-          void stamp.offsetWidth;
-          stamp.classList.add('slam');
+          stampEl.classList.remove('slam');
+          void stampEl.offsetWidth;
+          stampEl.classList.add('slam');
           stage.classList.remove('shake');
           void stage.offsetWidth;
           stage.classList.add('shake');
           M.confetti(stage);
         }
       } else {
-        stampLayer.classList.remove('on');
-        stamp.classList.remove('slam');
+        soldEl.classList.remove('on');
+        stampEl.classList.remove('slam');
       }
     }
 
     return { el: stage, set: set, setSoldOut: setSoldOut, flip: doFlip };
   };
 
-  /* ================= canvas PNG renderer (600x840 @2x) ================= */
+  /* ================= canvas PNG renderer (1200×1680 = 600×840 @2x) ================= */
 
   function roundRectPath(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -447,25 +441,6 @@
     ctx.arcTo(x, y + h, x, y, r);
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
-  }
-
-  function holoGradient(ctx, w, h) {
-    if (typeof ctx.createConicGradient === 'function') {
-      var g = ctx.createConicGradient(-Math.PI / 2, w / 2, h / 2);
-      g.addColorStop(0.00, '#21e6e6');
-      g.addColorStop(0.25, '#ff2d87');
-      g.addColorStop(0.50, '#c8ff00');
-      g.addColorStop(0.75, '#ffd75e');
-      g.addColorStop(1.00, '#21e6e6');
-      return g;
-    }
-    var lg = ctx.createLinearGradient(0, 0, w, h);
-    lg.addColorStop(0.00, '#21e6e6');
-    lg.addColorStop(0.30, '#ff2d87');
-    lg.addColorStop(0.60, '#c8ff00');
-    lg.addColorStop(0.85, '#ffd75e');
-    lg.addColorStop(1.00, '#21e6e6');
-    return lg;
   }
 
   function drawCover(ctx, image, x, y, w, h) {
@@ -488,14 +463,14 @@
     });
   }
 
-  function fitText(ctx, text, family, weight, maxSize, minSize, maxWidth) {
+  function fitText(ctx, text, maxSize, minSize, maxWidth) {
     var size = maxSize;
     while (size > minSize) {
-      ctx.font = weight + ' ' + size + 'px ' + family;
+      ctx.font = '700 ' + size + 'px "Inter", sans-serif';
       if (ctx.measureText(text).width <= maxWidth) break;
-      size -= 3;
+      size -= 2;
     }
-    ctx.font = weight + ' ' + size + 'px ' + family;
+    ctx.font = '700 ' + size + 'px "Inter", sans-serif';
     return size;
   }
 
@@ -522,7 +497,8 @@
     return lines;
   }
 
-  /* data: { name, tagline, photo, supply, serial (int|null) } -> Promise<canvas> */
+  /* data: { name, tagline, photo, supply, serial, stats: { floor_cents, avg_paid_cents, high_paid_cents } }
+     -> Promise<canvas> */
   M.renderCardPNG = function (data) {
     var W = 1200, H = 1680;
     var canvas = document.createElement('canvas');
@@ -532,151 +508,129 @@
     var fontsReady = Promise.resolve();
     if (document.fonts && document.fonts.load) {
       fontsReady = Promise.all([
-        document.fonts.load('900 90px "Unbounded"'),
-        document.fonts.load('700 40px "IBM Plex Mono"'),
-        document.fonts.load('italic 400 34px "IBM Plex Mono"')
+        document.fonts.load('700 80px "Inter"'),
+        document.fonts.load('400 34px "Inter"'),
+        document.fonts.load('600 28px "Inter"')
       ]).catch(function () {});
     }
 
     return Promise.all([fontsReady, loadImage(data.photo)]).then(function (res) {
       var photo = res[1];
-      var name = String(data.name || 'YOUR NAME').toUpperCase();
+      var name    = String(data.name || 'YOUR NAME');
       var tagline = String(data.tagline || '');
-      var supply = data.supply || 1;
-      var serial = data.serial || null;
+      var supply  = data.supply || 1;
+      var serial  = data.serial || null;
+      var st      = data.stats || {};
 
-      /* --- holo frame --- */
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, W, H);
-      roundRectPath(ctx, 0, 0, W, H, 16);
-      ctx.fillStyle = holoGradient(ctx, W, H);
+      /* card background */
+      ctx.fillStyle = '#0d0d10';
+      roundRectPath(ctx, 0, 0, W, H, 20);
       ctx.fill();
 
-      /* --- inner slab --- */
-      roundRectPath(ctx, 26, 26, W - 52, H - 52, 10);
-      ctx.fillStyle = '#101016';
+      /* metallic strip */
+      var mGrad = ctx.createLinearGradient(0, 0, W, 0);
+      mGrad.addColorStop(0,    '#5a5a5a');
+      mGrad.addColorStop(0.18, '#c8a462');
+      mGrad.addColorStop(0.34, '#e8d9b0');
+      mGrad.addColorStop(0.50, '#c8a462');
+      mGrad.addColorStop(0.66, '#9a8060');
+      mGrad.addColorStop(0.82, '#c8a462');
+      mGrad.addColorStop(1,    '#5a5a5a');
+      ctx.fillStyle = mGrad;
+      roundRectPath(ctx, 0, 0, W, 52, 20);
       ctx.fill();
+      ctx.fillRect(0, 32, W, 20); /* square off strip bottom */
 
-      /* --- head row --- */
-      try { ctx.letterSpacing = '4px'; } catch (e) {}
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#c8ff00';
-      ctx.font = '900 34px "Unbounded", sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('ME COIN', 72, 102);
-      ctx.fillStyle = '#21e6e6';
-      ctx.font = '500 22px "IBM Plex Mono", monospace';
-      ctx.textAlign = 'right';
-      try { ctx.letterSpacing = '8px'; } catch (e) {}
-      ctx.fillText('LIMITED MINT', W - 72, 100);
-      try { ctx.letterSpacing = '0px'; } catch (e) {}
-
-      /* --- photo window --- */
-      var px = 72, py = 132, pw = W - 144, ph = 1010;
+      /* photo area */
+      var photoY = 52, photoH = 1110;
       ctx.save();
-      roundRectPath(ctx, px, py, pw, ph, 8);
+      ctx.beginPath();
+      ctx.rect(0, photoY, W, photoH);
       ctx.clip();
-      ctx.fillStyle = '#070709';
-      ctx.fillRect(px, py, pw, ph);
+      ctx.fillStyle = '#111114';
+      ctx.fillRect(0, photoY, W, photoH);
       if (photo) {
-        drawCover(ctx, photo, px, py, pw, ph);
+        drawCover(ctx, photo, 0, photoY, W, photoH);
       } else {
-        ctx.fillStyle = 'rgba(244,241,228,.3)';
-        ctx.font = '500 26px "IBM Plex Mono", monospace';
+        ctx.font = '400 32px "Inter", sans-serif';
+        ctx.fillStyle = '#71717a';
         ctx.textAlign = 'center';
-        ctx.fillText('NO ASSET LOADED', px + pw / 2, py + ph / 2);
+        ctx.fillText('No photo uploaded', W / 2, photoY + photoH / 2);
       }
-      ctx.restore();
-      /* inner cyan glow on the window */
-      ctx.save();
-      roundRectPath(ctx, px, py, pw, ph, 8);
-      ctx.strokeStyle = 'rgba(33,230,230,.45)';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = 'rgba(33,230,230,.5)';
-      ctx.shadowBlur = 30;
-      ctx.stroke();
+      /* gradient fade at bottom of photo */
+      var fadeGrad = ctx.createLinearGradient(0, photoY + photoH * 0.46, 0, photoY + photoH);
+      fadeGrad.addColorStop(0,    'rgba(13,13,16,0)');
+      fadeGrad.addColorStop(0.5,  'rgba(13,13,16,0.5)');
+      fadeGrad.addColorStop(1,    'rgba(13,13,16,0.94)');
+      ctx.fillStyle = fadeGrad;
+      ctx.fillRect(0, photoY, W, photoH);
       ctx.restore();
 
-      /* --- name --- */
-      ctx.fillStyle = '#f4f1e4';
+      /* serial badge */
+      var badgeText = serial ? M.fmtSerial(serial, supply) : '/ ' + supply;
+      ctx.font = '600 26px "Inter", sans-serif';
+      ctx.textBaseline = 'alphabetic';
+      var bw = ctx.measureText(badgeText).width;
+      var bpad = 14, by = 86, bh = 40;
+      var bx = W - bw - bpad * 2 - 30;
+      ctx.fillStyle = 'rgba(0,0,0,0.72)';
+      roundRectPath(ctx, bx, by - bh + 10, bw + bpad * 2, bh, 4);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200,164,98,0.5)';
+      ctx.lineWidth = 1.5;
+      roundRectPath(ctx, bx, by - bh + 10, bw + bpad * 2, bh, 4);
+      ctx.stroke();
+      ctx.fillStyle = '#c8a462';
       ctx.textAlign = 'left';
-      fitText(ctx, name, '"Unbounded", sans-serif', '900', 84, 36, pw);
-      ctx.fillText(name, 72, 1248);
+      ctx.fillText(badgeText, bx + bpad, by);
 
-      /* --- tagline (max 2 lines) --- */
-      ctx.font = 'italic 400 33px "IBM Plex Mono", monospace';
-      ctx.fillStyle = 'rgba(244,241,228,.72)';
-      var lines = wrapTwoLines(ctx, tagline, pw);
-      for (var li = 0; li < lines.length; li++) {
-        ctx.fillText(lines[li], 72, 1306 + li * 46);
+      /* name */
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#fafaf9';
+      fitText(ctx, name, 96, 38, W - 100);
+      ctx.fillText(name, 60, 1280);
+
+      /* tagline */
+      if (tagline) {
+        ctx.font = '400 34px "Inter", sans-serif';
+        ctx.fillStyle = 'rgba(250,250,249,0.62)';
+        var lines = wrapTwoLines(ctx, tagline, W - 120);
+        for (var li = 0; li < lines.length; li++) {
+          ctx.fillText(lines[li], 60, 1338 + li * 50);
+        }
       }
 
-      /* --- dashed divider --- */
-      ctx.save();
-      ctx.strokeStyle = 'rgba(244,241,228,.25)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([10, 10]);
-      ctx.beginPath();
-      ctx.moveTo(72, 1414);
-      ctx.lineTo(W - 72, 1414);
-      ctx.stroke();
-      ctx.restore();
+      /* stats row */
+      var stats = [
+        { label: 'FLOOR', val: st.floor_cents      != null ? M.fmtUSD(st.floor_cents)       : '—' },
+        { label: 'AVG',   val: st.avg_paid_cents    != null ? M.fmtUSD(st.avg_paid_cents)    : '—' },
+        { label: 'HIGH',  val: st.high_paid_cents   != null ? M.fmtUSD(st.high_paid_cents)   : '—' }
+      ];
+      var statW = W / 3, statY = 1462, statH = 182;
+      for (var si = 0; si < 3; si++) {
+        ctx.fillStyle = 'rgba(10,10,11,0.82)';
+        ctx.fillRect(si * statW + 1, statY, statW - 2, statH);
+        if (si > 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.06)';
+          ctx.fillRect(si * statW, statY, 1, statH);
+        }
+        ctx.font = '500 22px "Inter", sans-serif';
+        ctx.fillStyle = '#71717a';
+        ctx.textAlign = 'center';
+        ctx.fillText(stats[si].label, si * statW + statW / 2, statY + 46);
+        ctx.font = '600 38px "Inter", sans-serif';
+        ctx.fillStyle = si === 0 ? '#c8a462' : '#fafaf9';
+        ctx.fillText(stats[si].val, si * statW + statW / 2, statY + 110);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, statY, W, statH);
 
-      /* --- supply chip (left) --- */
-      var chipText = '1 OF ' + supply;
-      ctx.font = '700 30px "IBM Plex Mono", monospace';
-      var chipW = ctx.measureText(chipText).width + 40;
-      ctx.fillStyle = '#c8ff00';
-      ctx.fillRect(72, 1448, chipW, 56);
-      ctx.fillStyle = '#000';
-      ctx.fillText(chipText, 92, 1487);
-
-      /* --- holo seal (right) --- */
-      var sealX = W - 138, sealY = 1494, sealR = 62;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(sealX, sealY, sealR, 0, Math.PI * 2);
-      ctx.fillStyle = holoGradient(ctx, W, H);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(sealX, sealY, sealR - 12, 0, Math.PI * 2);
-      ctx.fillStyle = '#101016';
-      ctx.fill();
-      ctx.fillStyle = '#f4f1e4';
-      ctx.font = '900 30px "Unbounded", sans-serif';
+      /* footer line */
+      ctx.font = '400 20px "Inter", sans-serif';
+      ctx.fillStyle = 'rgba(113,113,122,0.65)';
       ctx.textAlign = 'center';
-      ctx.fillText('MC', sealX, 1505);
-      ctx.restore();
-
-      /* --- serial (center, the hero number) --- */
-      ctx.textAlign = 'center';
-      if (serial) {
-        ctx.fillStyle = '#c8ff00';
-        ctx.font = '700 78px "IBM Plex Mono", monospace';
-        ctx.shadowColor = 'rgba(200,255,0,.5)';
-        ctx.shadowBlur = 26;
-        ctx.fillText(M.fmtSerial(serial, supply), W / 2, 1590);
-        ctx.shadowBlur = 0;
-      } else {
-        ctx.fillStyle = '#21e6e6';
-        ctx.font = '700 44px "IBM Plex Mono", monospace';
-        try { ctx.letterSpacing = '10px'; } catch (e) {}
-        ctx.fillText('UNNUMBERED PROOF', W / 2, 1578);
-        try { ctx.letterSpacing = '0px'; } catch (e) {}
-      }
-
-      /* --- footer micro-line --- */
-      ctx.fillStyle = 'rgba(244,241,228,.4)';
-      ctx.font = '400 19px "IBM Plex Mono", monospace';
-      ctx.fillText('CERTIFICATE OF SELF-WORTH · MECOIN HUMAN ASSET REGISTRY', W / 2, 1636);
-
-      /* --- scanlines + grain for the holo vibe --- */
-      ctx.fillStyle = 'rgba(0,0,0,.07)';
-      for (var y = 0; y < H; y += 6) ctx.fillRect(0, y, W, 1);
-      ctx.fillStyle = 'rgba(255,255,255,.04)';
-      for (var g = 0; g < 1700; g++) {
-        ctx.fillRect(Math.random() * W, Math.random() * H, 2, 2);
-      }
+      ctx.fillText('ME COIN — Certificate of Self-Worth', W / 2, H - 24);
 
       return canvas;
     });

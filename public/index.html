@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060608'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%23c8ff00' stroke-width='2'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%23c8ff00' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -28,9 +28,9 @@
     <p class="hero-kicker">/// the personal scarcity engine</p>
     <h1 class="hero-title">Mint<br>yourself.<br><span class="accent">Someone will&nbsp;pay.</span></h1>
     <p class="hero-sub">
-      Turn your face into a limited-run <b>holo-foil trading card</b>. You set the supply.
-      You share the link. Buyers pay <b>whatever they want</b> — real money, named by them.
-      Value is a group hallucination. Join one.
+      Turn yourself into a limited-run trading card. Set the supply and your <b>floor price</b>.
+      Share the link. Buyers pay <b>floor or above</b> — real money, named by them.
+      The card is worth what someone paid for it.
     </p>
     <div class="hero-cta-row">
       <a class="btn" href="#builder">START THE PRESS</a>
@@ -41,12 +41,12 @@
     <div class="marquee-track">
       <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">✕</span>
       <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">✕</span>
-      <span>PAY WHAT YOU WANT — MIN $0.50, STRIPE PHYSICS</span><span class="mq-x">✕</span>
-      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">✕</span>
-      <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">✕</span>
-      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">✕</span>
-      <span>PAY WHAT YOU WANT — MIN $0.50, STRIPE PHYSICS</span><span class="mq-x">✕</span>
-      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">✕</span>
+      <span>YOU SET THE FLOOR — BUYERS GO ABOVE IT</span><span class="mq-x">·</span>
+      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">·</span>
+      <span>SUPPLY IS WHATEVER YOU SAY IT IS</span><span class="mq-x">·</span>
+      <span>VALUE IS A GROUP HALLUCINATION</span><span class="mq-x">·</span>
+      <span>YOU SET THE FLOOR — BUYERS GO ABOVE IT</span><span class="mq-x">·</span>
+      <span>THE CARD IS WORTH WHAT SOMEONE PAID FOR IT</span><span class="mq-x">·</span>
     </div>
   </div>
 </section>
@@ -110,6 +110,18 @@
           </div>
           <div class="ticks" aria-hidden="true"><span>1</span><span>250</span><span>500</span><span>750</span><span>1000</span></div>
           <p class="fine">SUPPLY IS WHATEVER YOU SAY IT IS.</p>
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <label for="floor">Floor price</label>
+            <span class="field-meta" id="floor-read">$10.00</span>
+          </div>
+          <div class="floor-row">
+            <span class="floor-prefix">$</span>
+            <input class="tin" id="floor" value="10" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="10.00" aria-describedby="floor-help">
+          </div>
+          <p class="fine" id="floor-help">Minimum buyers must pay. They can go higher — you set the floor.</p>
         </div>
 
         <div class="field">

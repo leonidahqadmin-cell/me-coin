@@ -38,10 +38,10 @@
     var buyBtn = M.byId('buy-btn');
     var buyErr = M.byId('buy-err');
 
-    /* quick-price chips ($1 / $5 / $20) + CUSTOM */
+    /* quick-price chips (floor / 2× / 5×) + CUSTOM */
     var chipsEl = M.byId('chips');
-    M.QUICK_CHIPS_CENTS.forEach(function (cents) {
-      var b = M.el('button', 'chip', '$' + (cents / 100));
+    [card.price_floor_cents, card.price_floor_cents * 2, card.price_floor_cents * 5].forEach(function (cents) {
+      var b = M.el('button', 'chip', M.fmtUSD(cents));
       b.type = 'button';
       b.addEventListener('click', function () {
         amtIn.value = String(cents / 100);
@@ -77,13 +77,14 @@
 
       view.set({
         name: card.name, tagline: card.tagline, photo: card.photo,
-        supply: card.supply, serial: null
+        supply: card.supply, serial: null,
+        stats: { floor_cents: card.price_floor_cents, avg_paid_cents: card.stats.avg_paid_cents, high_paid_cents: card.stats.high_paid_cents }
       });
-      view.setSoldOut(soldOut, { label: 'SOLD OUT' });
+      view.setSoldOut(soldOut);
 
-      M.byId('st-last').textContent = M.fmtUSD(card.stats.last_paid_cents);
+      M.byId('st-floor').textContent = M.fmtUSD(card.price_floor_cents);
       M.byId('st-avg').textContent = M.fmtUSD(card.stats.avg_paid_cents);
-      M.byId('st-raised').textContent = M.fmtUSD(card.stats.total_raised_cents);
+      M.byId('st-high').textContent = M.fmtUSD(card.stats.high_paid_cents);
       M.byId('st-left').textContent = remaining + ' / ' + card.supply;
 
       M.byId('soldout').hidden = !soldOut;
@@ -104,7 +105,7 @@
         return;
       }
       var cents = Math.round(dollars * 100);
-      if (cents < M.AMOUNT_MIN_CENTS) { showBuyErr("minimum is $0.50 — Stripe won't move less. blame physics, not us."); return; }
+      if (cents < card.price_floor_cents) { showBuyErr('minimum is ' + M.fmtUSD(card.price_floor_cents) + ' — that\'s the floor the creator set.'); return; }
       if (cents > M.AMOUNT_MAX_CENTS) { showBuyErr('ceiling is $999,999.99. dream slightly smaller.'); return; }
 
       buyBtn.disabled = true;

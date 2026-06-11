@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060608'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%23c8ff00' stroke-width='2'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%23c8ff00' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -46,15 +46,15 @@
         <p class="cp-tagline" id="cp-tagline"></p>
 
         <div class="stats-row">
-          <div class="stat is-acid"><span class="label">Last paid</span><span class="val" id="st-last">—</span></div>
+          <div class="stat is-acid"><span class="label">Floor</span><span class="val" id="st-floor">—</span></div>
           <div class="stat"><span class="label">Avg paid</span><span class="val" id="st-avg">—</span></div>
-          <div class="stat is-acid"><span class="label">Total raised</span><span class="val" id="st-raised">$0.00</span></div>
+          <div class="stat is-acid"><span class="label">High paid</span><span class="val" id="st-high">—</span></div>
           <div class="stat"><span class="label">Left</span><span class="val" id="st-left">—</span></div>
         </div>
 
         <!-- BUY: onboarded & not sold out -->
         <div class="panel buybox" id="buybox" hidden>
-          <span class="label">Name your price — it's worth what you pay</span>
+          <span class="label">Name your price — floor or above</span>
           <div class="amt-wrap">
             <span class="amt-dollar">$</span>
             <input class="amt-input" id="amt" inputmode="decimal" placeholder="5" autocomplete="off" spellcheck="false" aria-label="Amount in US dollars">
@@ -62,7 +62,7 @@
           <div class="chips" id="chips"></div>
           <button class="btn btn-huge" id="buy-btn" type="button">NAME YOUR PRICE</button>
           <div class="errbox" id="buy-err" hidden></div>
-          <p class="fine" id="buy-fine">Minimum $0.50 — Stripe physics, not ours. Maximum $999,999.99. You pick everything in between.</p>
+          <p class="fine" id="buy-fine">Pay the floor price or more. Maximum $999,999.99.</p>
         </div>
 
         <!-- NOT FOR SALE: not onboarded -->

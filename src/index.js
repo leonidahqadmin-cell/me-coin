@@ -93,12 +93,15 @@ const SCHEMA_STATEMENTS = [
 let schemaReady = null; // module-level (per isolate)
 
 export function ensureSchema(env) {
-  schemaReady ??= env.DB
-    .batch(SCHEMA_STATEMENTS.map((sql) => env.DB.prepare(sql)))
-    .catch((e) => {
-      schemaReady = null; // next request retries
-      throw e;
-    });
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      await env.DB.batch(SCHEMA_STATEMENTS.map((sql) => env.DB.prepare(sql)));
+      // price_floor_cents migration — silently ignored if column already exists
+      try {
+        await env.DB.prepare('ALTER TABLE cards ADD COLUMN price_floor_cents INTEGER NOT NULL DEFAULT 50').run();
+      } catch { /* column exists */ }
+    })().catch((e) => { schemaReady = null; throw e; });
+  }
   return schemaReady;
 }
 
@@ -134,13 +137,12 @@ function errorPage(status, heading, message) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(heading)} — ME COIN</title>
 <style>
-  :root{--void:#060608;--paper:#f4f1e4;--acid:#c8ff00;--heat:#ff2d87;--ink:#101016}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--void);color:var(--paper);font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace}
-  .slab{border:1px solid rgba(244,241,228,.12);background:var(--ink);padding:48px 56px;text-align:center;max-width:560px;border-radius:4px}
-  h1{margin:0 0 12px;font-size:56px;letter-spacing:.04em;color:var(--heat)}
-  p{margin:0 0 24px;opacity:.8;line-height:1.5}
-  a{color:var(--acid);text-decoration:none;border-bottom:1px dashed var(--acid)}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0b;color:#fafaf9;font-family:'Inter',system-ui,-apple-system,sans-serif}
+  .slab{border:1px solid #27272a;background:#111114;padding:48px 56px;text-align:center;max-width:560px;border-radius:8px}
+  h1{margin:0 0 12px;font-size:48px;font-weight:700;letter-spacing:-.02em;color:#f87171}
+  p{margin:0 0 24px;color:#a1a1aa;line-height:1.6;font-size:15px}
+  a{color:#c8a462;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -219,13 +221,14 @@ async function loadCardPublic(env, id, row = undefined) {
   const card = row === undefined ? await loadCardRow(env, id) : row;
   if (!card) return null;
   const [agg, last] = await env.DB.batch([
-    env.DB.prepare('SELECT COUNT(*) AS cnt, SUM(amount_cents) AS total FROM sales WHERE card_id = ?').bind(card.id),
+    env.DB.prepare('SELECT COUNT(*) AS cnt, SUM(amount_cents) AS total, MAX(amount_cents) AS high FROM sales WHERE card_id = ?').bind(card.id),
     env.DB.prepare('SELECT amount_cents FROM sales WHERE card_id = ? ORDER BY created_at DESC, id DESC LIMIT 1').bind(card.id),
   ]);
   const aggRow = (agg.results && agg.results[0]) || {};
   const lastRow = (last.results && last.results[0]) || null;
   const count = aggRow.cnt || 0;
   const total = aggRow.total || 0;
+  const high = aggRow.high || null;
   return {
     id: card.id,
     name: card.name,
@@ -235,9 +238,11 @@ async function loadCardPublic(env, id, row = undefined) {
     sold: card.sold,
     onboarded: card.charges_enabled === 1,
     created_at: card.created_at,
+    price_floor_cents: card.price_floor_cents || 50,
     stats: {
       last_paid_cents: lastRow ? lastRow.amount_cents : null,
       avg_paid_cents: count > 0 ? Math.round(total / count) : null,
+      high_paid_cents: high,
       total_raised_cents: total,
       sales_count: count,
     },
@@ -321,6 +326,10 @@ async function handleMint(request, env) {
   if (!Number.isInteger(supply) || supply < SUPPLY_MIN || supply > SUPPLY_MAX) {
     return err(400, `supply must be an integer between ${SUPPLY_MIN} and ${SUPPLY_MAX}`);
   }
+  const floorCents = body.price_floor_cents;
+  if (!Number.isInteger(floorCents) || floorCents < AMOUNT_MIN_CENTS || floorCents > AMOUNT_MAX_CENTS) {
+    return err(400, `price_floor_cents must be an integer between ${AMOUNT_MIN_CENTS} and ${AMOUNT_MAX_CENTS}`);
+  }
 
   // Rate limit: max 20 mints per IP per rolling hour (D1 count).
   const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
@@ -337,9 +346,9 @@ async function handleMint(request, env) {
   const keyHash = await sha256Hex(manageKey); // only the digest is stored
   await env.DB
     .prepare(
-      'INSERT INTO cards (id, name, tagline, photo, supply, sold, manage_key_hash, charges_enabled, hidden, mint_ip, created_at) VALUES (?,?,?,?,?,0,?,0,0,?,?)',
+      'INSERT INTO cards (id, name, tagline, photo, supply, sold, manage_key_hash, charges_enabled, hidden, mint_ip, created_at, price_floor_cents) VALUES (?,?,?,?,?,0,?,0,0,?,?,?)',
     )
-    .bind(id, name, tagline, photo, supply, keyHash, ip, Date.now())
+    .bind(id, name, tagline, photo, supply, keyHash, ip, Date.now(), floorCents)
     .run();
 
   return json({ id, manage_key: manageKey }, 201);
@@ -395,8 +404,10 @@ async function handleCheckout(request, env, REAL, origin) {
   if (!card) return err404();
 
   const amount = body.amount_cents;
-  if (!Number.isInteger(amount) || amount < AMOUNT_MIN_CENTS || amount > AMOUNT_MAX_CENTS) {
-    return err(400, 'amount must be between $0.50 and $999,999.99');
+  const floorCents = card.price_floor_cents || AMOUNT_MIN_CENTS;
+  if (!Number.isInteger(amount) || amount < floorCents || amount > AMOUNT_MAX_CENTS) {
+    const floorStr = '$' + (floorCents / 100).toFixed(2);
+    return err(400, `amount must be at least ${floorStr}`);
   }
   if (card.charges_enabled !== 1) return err(409, 'not for sale yet');
   if (card.sold >= card.supply) return err(409, 'sold out');
@@ -534,8 +545,9 @@ async function handleDemoConfirm(request, env) {
   const { cardId, amountCents } = parseDemoSession(sessionId);
   const card = await loadCardRow(env, cardId);
   if (!card) return err404();
-  if (amountCents < AMOUNT_MIN_CENTS || amountCents > AMOUNT_MAX_CENTS) {
-    return err(400, 'amount must be between $0.50 and $999,999.99');
+  const demoFloor = card.price_floor_cents || AMOUNT_MIN_CENTS;
+  if (amountCents < demoFloor || amountCents > AMOUNT_MAX_CENTS) {
+    return err(400, 'amount is below the floor price');
   }
   try {
     await fulfillSale(env, {
@@ -711,20 +723,19 @@ async function handleAdminReports(env, url) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>REPORTS — ME COIN ADMIN</title>
 <style>
-  :root{--void:#060608;--paper:#f4f1e4;--acid:#c8ff00;--heat:#ff2d87;--ink:#101016}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;background:var(--void);color:var(--paper);font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;padding:32px}
-  h1{font-size:20px;letter-spacing:.08em;color:var(--acid);margin:0 0 4px}
-  .sub{opacity:.6;margin:0 0 24px;font-size:13px}
-  table{border-collapse:collapse;width:100%;background:var(--ink);border:1px solid rgba(244,241,228,.12)}
-  th,td{border:1px solid rgba(244,241,228,.12);padding:8px 12px;text-align:left;font-size:13px;vertical-align:top}
-  th{color:var(--acid);letter-spacing:.06em;font-weight:500}
+  body{margin:0;min-height:100vh;background:#0a0a0b;color:#fafaf9;font-family:'Inter',system-ui,-apple-system,sans-serif;padding:32px;font-size:14px}
+  h1{font-size:18px;font-weight:700;color:#fafaf9;margin:0 0 4px}
+  .sub{color:#71717a;margin:0 0 24px;font-size:13px}
+  table{border-collapse:collapse;width:100%;background:#111114;border:1px solid #27272a}
+  th,td{border:1px solid #27272a;padding:8px 12px;text-align:left;font-size:13px;vertical-align:top}
+  th{color:#a1a1aa;letter-spacing:.04em;font-weight:600}
   td.reason{max-width:420px;word-break:break-word}
-  a{color:#21e6e6;text-decoration:none;border-bottom:1px dashed #21e6e6}
-  button{background:transparent;border:1px solid var(--heat);color:var(--heat);font-family:inherit;font-size:12px;letter-spacing:.06em;padding:6px 10px;cursor:pointer;border-radius:3px}
-  button:hover{background:var(--heat);color:var(--void)}
+  a{color:#c8a462;text-decoration:underline}
+  button{background:transparent;border:1px solid #f87171;color:#f87171;font-family:inherit;font-size:12px;padding:5px 10px;cursor:pointer;border-radius:4px}
+  button:hover{background:#f87171;color:#0a0a0b}
   button:disabled{opacity:.4;cursor:default}
-  .empty{opacity:.6;padding:32px;text-align:center}
+  .empty{color:#71717a;padding:32px;text-align:center}
 </style>
 </head>
 <body>

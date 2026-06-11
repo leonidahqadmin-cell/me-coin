@@ -32,6 +32,8 @@
     var feedEl = M.byId('sim-feed');
     var moodEl = M.byId('sim-mood');
     var simPriceEl = M.byId('sim-price');
+    var floorIn = M.byId('floor');
+    var floorRead = M.byId('floor-read');
 
     var card = M.createCard({});
     M.byId('card-stage').appendChild(card.el);
@@ -46,7 +48,8 @@
       tagline: '',
       photo: null,
       supply: 100,
-      simPrice: 10
+      simPrice: 10,
+      floorCents: 1000
     };
 
     function renderCard() {
@@ -211,6 +214,21 @@
       renderMood();
     }
     priceIn.addEventListener('input', setSimPrice);
+
+    /* ---------- floor price ---------- */
+    function setFloor() {
+      var raw = String(floorIn.value || '').replace(/[$,\s]/g, '');
+      var dollars = parseFloat(raw);
+      if (!isFinite(dollars) || dollars < 0.5) {
+        floorRead.textContent = 'min $0.50';
+        state.floorCents = 50;
+        return;
+      }
+      var cents = Math.min(99999999, Math.max(50, Math.round(dollars * 100)));
+      state.floorCents = cents;
+      floorRead.textContent = M.fmtUSD(cents);
+    }
+    floorIn.addEventListener('input', setFloor);
 
     /* ============================================================
        SIM MARKET — the game loop (client-side only, 0% real)
@@ -397,6 +415,12 @@
         showErr('supply must be 1–1000.');
         return;
       }
+      var floorCents = state.floorCents;
+      if (!floorCents || floorCents < 50 || floorCents > 99999999) {
+        showErr('floor price must be at least $0.50.');
+        floorIn.focus();
+        return;
+      }
 
       mintBtn.disabled = true;
       mintBtn.textContent = 'PRESSING THE FOIL…';
@@ -404,7 +428,8 @@
         name: name,
         tagline: tagline,
         photo: state.photo,
-        supply: state.supply
+        supply: state.supply,
+        price_floor_cents: floorCents
       }).then(function (r) {
         M.saveKey(r.id, r.manage_key, name);
         mintBtn.textContent = 'MINTED. REDIRECTING…';
@@ -462,6 +487,7 @@
     renderCard();
     renderVpc();
     setSimPrice();
+    setFloor();
     simReset(false);
     M.feedLine(feedEl, {
       tag: 'MARKET', cls: 'sys', quiet: true,
