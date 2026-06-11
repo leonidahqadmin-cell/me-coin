@@ -49,20 +49,43 @@ Backend NEVER touches `public/`. Frontend NEVER touches `src/`, `wrangler.jsonc`
 Backend exports them from `src/constants.js`; frontend duplicates them as literals.
 
 ```js
-export const AMOUNT_MIN_CENTS = 50;          // $0.50 — Stripe hard minimum
-export const AMOUNT_MAX_CENTS = 99999999;    // $999,999.99
+export const VERSION = 'v0.4.0';             // bumped every release; live at /api/config
+
+export const AMOUNT_MIN_CENTS = 100;         // $1.00 — creator net must never be $0
+export const AMOUNT_MAX_CENTS = 99999999;    // schema bound only — launch caps rule
+export const LAUNCH_PRICE_CAP_CENTS = 50000; // $500 max per sale during launch
+export const YOUNG_CARD_CAP_CENTS  = 10000;  // $100 max per sale, card's first 7 days
+export const YOUNG_CARD_MS        = 7 * 86400000;
 export const SUPPLY_MIN      = 1;
 export const SUPPLY_MAX      = 1000;
 export const NAME_MAX        = 40;           // characters (after .trim())
 export const TAGLINE_MAX     = 100;          // characters (after .trim())
 export const REASON_MAX      = 300;          // report reason characters
 export const PHOTO_MAX_CHARS = 512000;       // dataURL STRING length ≤ 500 KiB
+export const OG_MAX_CHARS    = 307200;       // og unfurl image cap (~300 KiB)
 export const PHOTO_PREFIX_RE = /^data:image\/(jpeg|png|webp);base64,/;
-export const FEE_RATE        = 0.10;         // platform fee
-export const feeCents = (amountCents) => Math.round(amountCents * 0.10);
+// Additive platform fee: $0.30 + 10%, never more than the amount itself.
+export const FEE_FIXED_CENTS = 30;
+export const FEE_RATE        = 0.10;
+export const feeCents = (a) => Math.min(a, FEE_FIXED_CENTS + Math.round(a * FEE_RATE));
 export const MINT_LIMIT_PER_IP = 20;         // per rolling 3600s window → 429
+export const CHECKOUT_LIMIT_PER_IP = 10;     // checkout sessions per IP/hour → 429
+export const REPORT_AUTOHIDE_COUNT = 3;      // distinct reports in 7 days → hidden
+export const DISPUTE_AUTOHIDE_COUNT = 2;     // disputes → hidden
 export const QUICK_CHIPS_CENTS = [100, 500, 2000];  // $1 / $5 / $20
 ```
+
+### Release checklist (every deploy, no exceptions)
+
+1. Bump `VERSION` in `src/constants.js`.
+2. Commit (PRs for fleet contributions; founder direct-commits push same-day).
+3. `git tag vX.Y.Z && git push origin master --tags`.
+4. `wrangler deploy`.
+5. Verify `curl https://<host>/api/config` reports the new version.
+
+There is no build step, so the version is maintained by this checklist and
+verified externally by comparing `/api/config` to the latest tag — drift
+between them is itself a detectable protocol violation, by design.
 
 Additional fixed agreements:
 

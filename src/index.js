@@ -3,19 +3,31 @@
 // Interface contract: ARCHITECTURE.md (binding). Behavior: SPEC.md.
 
 import {
+  VERSION,
   AMOUNT_MIN_CENTS,
   AMOUNT_MAX_CENTS,
+  LAUNCH_PRICE_CAP_CENTS,
+  YOUNG_CARD_CAP_CENTS,
+  YOUNG_CARD_MS,
   SUPPLY_MIN,
   SUPPLY_MAX,
   NAME_MAX,
   TAGLINE_MAX,
   REASON_MAX,
   PHOTO_MAX_CHARS,
+  OG_MAX_CHARS,
   PHOTO_PREFIX_RE,
+  FEE_FIXED_CENTS,
+  FEE_RATE,
   feeCents,
   MINT_LIMIT_PER_IP,
+  CHECKOUT_LIMIT_PER_IP,
+  REPORT_AUTOHIDE_COUNT,
+  REPORT_AUTOHIDE_MS,
+  DISPUTE_AUTOHIDE_COUNT,
 } from './constants.js';
 import { stripePost, stripeGet, verifyStripeSignature, timingSafeEqualStr } from './stripe.js';
+import { isBlockedName } from './blocklist.js';
 
 // ---------------------------------------------------------------------------
 // Security invariants (ARCHITECTURE.md §9)
@@ -88,6 +100,34 @@ const SCHEMA_STATEMENTS = [
     created_at INTEGER NOT NULL
   )`,
   'CREATE INDEX IF NOT EXISTS idx_reports_created ON reports (created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_reports_card ON reports (card_id, created_at)',
+  `CREATE TABLE IF NOT EXISTS disputes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    dispute_id     TEXT UNIQUE,
+    payment_intent TEXT,
+    card_id        TEXT,
+    amount_cents   INTEGER,
+    status         TEXT,
+    created_at     INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS checkout_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip         TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_checkout_log_ip ON checkout_log (ip, created_at)',
+];
+
+// Column migrations — each silently ignored once the column exists.
+const MIGRATION_STATEMENTS = [
+  "ALTER TABLE cards ADD COLUMN price_floor_cents INTEGER NOT NULL DEFAULT 50",
+  "ALTER TABLE cards ADD COLUMN attestation TEXT NOT NULL DEFAULT 'self'",
+  'ALTER TABLE cards ADD COLUMN adult_attested INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE cards ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE cards ADD COLUMN og_image TEXT',
+  'ALTER TABLE cards ADD COLUMN referred_by TEXT',
+  'ALTER TABLE sales ADD COLUMN payment_intent TEXT',
+  'ALTER TABLE sales ADD COLUMN buyer_email TEXT',
 ];
 
 let schemaReady = null; // module-level (per isolate)
@@ -96,10 +136,11 @@ export function ensureSchema(env) {
   if (!schemaReady) {
     schemaReady = (async () => {
       await env.DB.batch(SCHEMA_STATEMENTS.map((sql) => env.DB.prepare(sql)));
-      // price_floor_cents migration — silently ignored if column already exists
-      try {
-        await env.DB.prepare('ALTER TABLE cards ADD COLUMN price_floor_cents INTEGER NOT NULL DEFAULT 50').run();
-      } catch { /* column exists */ }
+      for (const sql of MIGRATION_STATEMENTS) {
+        try {
+          await env.DB.prepare(sql).run();
+        } catch { /* column exists */ }
+      }
     })().catch((e) => { schemaReady = null; throw e; });
   }
   return schemaReady;
@@ -239,6 +280,8 @@ async function loadCardPublic(env, id, row = undefined) {
     onboarded: card.charges_enabled === 1,
     created_at: card.created_at,
     price_floor_cents: card.price_floor_cents || 50,
+    attestation: card.attestation || 'self',
+    reviewed: card.reviewed === 1,
     stats: {
       last_paid_cents: lastRow ? lastRow.amount_cents : null,
       avg_paid_cents: count > 0 ? Math.round(total / count) : null,
@@ -260,7 +303,7 @@ class SoldOutError extends Error {
   }
 }
 
-async function fulfillSale(env, { session_id, card_id, amount_cents, mode }) {
+async function fulfillSale(env, { session_id, card_id, amount_cents, mode, payment_intent = null, buyer_email = null }) {
   // 1. Idempotency: a replayed session id must never double-fulfill.
   const existing = await env.DB
     .prepare('SELECT serial FROM sales WHERE session_id = ?')
@@ -280,9 +323,9 @@ async function fulfillSale(env, { session_id, card_id, amount_cents, mode }) {
   //    check the insert actually landed before counting it.
   const insert = await env.DB
     .prepare(
-      'INSERT INTO sales (card_id, serial, amount_cents, fee_cents, mode, session_id, created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id) DO NOTHING',
+      'INSERT INTO sales (card_id, serial, amount_cents, fee_cents, mode, session_id, created_at, payment_intent, buyer_email) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO NOTHING',
     )
-    .bind(card_id, serial, amount_cents, feeCents(amount_cents), mode, session_id, Date.now())
+    .bind(card_id, serial, amount_cents, feeCents(amount_cents), mode, session_id, Date.now(), payment_intent, buyer_email)
     .run();
 
   const changes = insert.meta ? insert.meta.changes : 1;
@@ -327,8 +370,38 @@ async function handleMint(request, env) {
     return err(400, `supply must be an integer between ${SUPPLY_MIN} and ${SUPPLY_MAX}`);
   }
   const floorCents = body.price_floor_cents;
-  if (!Number.isInteger(floorCents) || floorCents < AMOUNT_MIN_CENTS || floorCents > AMOUNT_MAX_CENTS) {
-    return err(400, `price_floor_cents must be an integer between ${AMOUNT_MIN_CENTS} and ${AMOUNT_MAX_CENTS}`);
+  if (!Number.isInteger(floorCents) || floorCents < AMOUNT_MIN_CENTS || floorCents > LAUNCH_PRICE_CAP_CENTS) {
+    return err(400, `price_floor_cents must be an integer between ${AMOUNT_MIN_CENTS} and ${LAUNCH_PRICE_CAP_CENTS}`);
+  }
+
+  // Safety attestations — required, stored, and disclosed on the card page.
+  const attestation = body.attestation;
+  if (attestation !== 'self' && attestation !== 'parody' && attestation !== 'tribute') {
+    return err(400, "attestation must be one of 'self', 'parody', 'tribute'");
+  }
+  if (body.adult_attested !== true) {
+    return err(400, 'you must confirm you are 18+ and the person on this card is an adult');
+  }
+
+  // Public-figure blocklist — a normalized name match requires manual contact.
+  if (isBlockedName(name)) {
+    return err(400, 'this name requires manual verification — contact us via the report link on any card');
+  }
+
+  // Optional pre-rendered OG unfurl image (client-generated, same format rules).
+  let ogImage = null;
+  if (body.og_image != null) {
+    if (typeof body.og_image !== 'string' || !PHOTO_PREFIX_RE.test(body.og_image) || body.og_image.length > OG_MAX_CHARS) {
+      return err(400, 'og_image must be a jpeg, png, or webp data URL of at most 300 KiB');
+    }
+    ogImage = body.og_image;
+  }
+
+  // Optional referral attribution (?via=<card_id> share chains → measurable K).
+  let referredBy = null;
+  if (typeof body.referred_by === 'string' && CARD_ID_RE.test(body.referred_by)) {
+    const ref = await env.DB.prepare('SELECT 1 FROM cards WHERE id = ?').bind(body.referred_by).first();
+    if (ref) referredBy = body.referred_by;
   }
 
   // Rate limit: max 20 mints per IP per rolling hour (D1 count).
@@ -346,9 +419,9 @@ async function handleMint(request, env) {
   const keyHash = await sha256Hex(manageKey); // only the digest is stored
   await env.DB
     .prepare(
-      'INSERT INTO cards (id, name, tagline, photo, supply, sold, manage_key_hash, charges_enabled, hidden, mint_ip, created_at, price_floor_cents) VALUES (?,?,?,?,?,0,?,0,0,?,?,?)',
+      'INSERT INTO cards (id, name, tagline, photo, supply, sold, manage_key_hash, charges_enabled, hidden, mint_ip, created_at, price_floor_cents, attestation, adult_attested, reviewed, og_image, referred_by) VALUES (?,?,?,?,?,0,?,0,0,?,?,?,?,1,0,?,?)',
     )
-    .bind(id, name, tagline, photo, supply, keyHash, ip, Date.now(), floorCents)
+    .bind(id, name, tagline, photo, supply, keyHash, ip, Date.now(), floorCents, attestation, ogImage, referredBy)
     .run();
 
   return json({ id, manage_key: manageKey }, 201);
@@ -375,10 +448,8 @@ async function handleSales(env, id) {
   return json({ sales: results });
 }
 
-async function handlePhoto(env, id) {
-  const card = await loadCardRow(env, id);
-  if (!card) return err404();
-  const m = PHOTO_DATAURL_RE.exec(card.photo);
+function dataUrlResponse(dataUrl) {
+  const m = PHOTO_DATAURL_RE.exec(dataUrl);
   if (!m) return err(500, 'internal error');
   let bytes;
   try {
@@ -396,6 +467,20 @@ async function handlePhoto(env, id) {
   });
 }
 
+async function handlePhoto(env, id) {
+  const card = await loadCardRow(env, id);
+  if (!card) return err404();
+  return dataUrlResponse(card.photo);
+}
+
+/** OG unfurl image — the share-rendered card if the client provided one,
+    otherwise the raw photo. */
+async function handleOg(env, id) {
+  const card = await loadCardRow(env, id);
+  if (!card) return err404();
+  return dataUrlResponse(card.og_image || card.photo);
+}
+
 async function handleCheckout(request, env, REAL, origin) {
   const body = await readJson(request);
   if (!body) return err(400, 'invalid json body');
@@ -404,13 +489,33 @@ async function handleCheckout(request, env, REAL, origin) {
   if (!card) return err404();
 
   const amount = body.amount_cents;
-  const floorCents = card.price_floor_cents || AMOUNT_MIN_CENTS;
-  if (!Number.isInteger(amount) || amount < floorCents || amount > AMOUNT_MAX_CENTS) {
+  // Effective floor: creator's floor, never below the platform minimum
+  // (pre-restructure cards may carry floors under $1.00).
+  const floorCents = Math.max(card.price_floor_cents || AMOUNT_MIN_CENTS, AMOUNT_MIN_CENTS);
+  if (!Number.isInteger(amount) || amount < floorCents) {
     const floorStr = '$' + (floorCents / 100).toFixed(2);
     return err(400, `amount must be at least ${floorStr}`);
   }
+  // Launch caps: $500/sale globally, $100/sale while a card is under 7 days old.
+  const cap = Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS;
+  if (amount > cap) {
+    return err(400, `launch cap: $${(cap / 100).toFixed(0)} max per sale${cap === YOUNG_CARD_CAP_CENTS ? ' while a card is under a week old' : ''}`);
+  }
   if (card.charges_enabled !== 1) return err(409, 'not for sale yet');
   if (card.sold >= card.supply) return err(409, 'sold out');
+  // Real charges require a human to have reviewed the card photo first.
+  if (REAL && card.reviewed !== 1) return err(409, 'this card is pending review — real purchases unlock once a human has looked at it');
+
+  // Velocity: max 10 checkout sessions per IP per rolling hour.
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
+  const recentCheckouts = await env.DB
+    .prepare('SELECT COUNT(*) AS n FROM checkout_log WHERE ip = ? AND created_at > ?')
+    .bind(ip, Date.now() - 3600000)
+    .first();
+  if (((recentCheckouts && recentCheckouts.n) || 0) >= CHECKOUT_LIMIT_PER_IP) {
+    return err(429, 'rate limit: too many checkouts this hour');
+  }
+  await env.DB.prepare('INSERT INTO checkout_log (ip, created_at) VALUES (?,?)').bind(ip, Date.now()).run();
 
   if (!REAL) {
     // Stateless demo session id: demo_<card_id>_<amount_cents>_<8 lowercase hex>
@@ -427,6 +532,9 @@ async function handleCheckout(request, env, REAL, origin) {
       ['line_items[0][price_data][product_data][name]', `ME COIN — ${card.name}`],
       ['payment_intent_data[application_fee_amount]', String(feeCents(amount))],
       ['payment_intent_data[transfer_data][destination]', card.stripe_account_id],
+      // Reads as a trading-card purchase on a bank statement — deliberately
+      // not "MECOIN" (memecoin optics invite disputes and processor risk).
+      ['payment_intent_data[statement_descriptor_suffix]', 'CARD'],
       ['success_url', `${origin}/success?session={CHECKOUT_SESSION_ID}`],
       ['cancel_url', `${origin}/c/${card.id}`],
       ['metadata[card_id]', card.id],
@@ -517,6 +625,16 @@ async function handleReport(request, env) {
     .prepare('INSERT INTO reports (card_id, reason, created_at) VALUES (?,?,?)')
     .bind(card.id, reason, Date.now())
     .run();
+
+  // Auto-hide: 3+ reports inside 7 days pulls the card pending human review.
+  const recent = await env.DB
+    .prepare('SELECT COUNT(*) AS n FROM reports WHERE card_id = ? AND created_at > ?')
+    .bind(card.id, Date.now() - REPORT_AUTOHIDE_MS)
+    .first();
+  if (((recent && recent.n) || 0) >= REPORT_AUTOHIDE_COUNT && card.hidden === 0) {
+    await env.DB.prepare('UPDATE cards SET hidden = 1 WHERE id = ?').bind(card.id).run();
+    console.error(`MODERATION: card ${card.id} auto-hidden — ${recent.n} reports in 7 days`);
+  }
   return json({ ok: true }, 201);
 }
 
@@ -545,9 +663,10 @@ async function handleDemoConfirm(request, env) {
   const { cardId, amountCents } = parseDemoSession(sessionId);
   const card = await loadCardRow(env, cardId);
   if (!card) return err404();
-  const demoFloor = card.price_floor_cents || AMOUNT_MIN_CENTS;
-  if (amountCents < demoFloor || amountCents > AMOUNT_MAX_CENTS) {
-    return err(400, 'amount is below the floor price');
+  const demoFloor = Math.max(card.price_floor_cents || AMOUNT_MIN_CENTS, AMOUNT_MIN_CENTS);
+  const demoCap = Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS;
+  if (amountCents < demoFloor || amountCents > demoCap) {
+    return err(400, 'amount is outside the floor/cap bounds');
   }
   try {
     await fulfillSale(env, {
@@ -580,6 +699,37 @@ async function handleWebhook(request, env) {
     return err(400, 'bad payload');
   }
 
+  if (event && event.type === 'charge.dispute.created') {
+    const dispute = (event.data && event.data.object) || {};
+    const pi = typeof dispute.payment_intent === 'string' ? dispute.payment_intent : null;
+    if (dispute.id && pi) {
+      const sale = await env.DB
+        .prepare('SELECT card_id FROM sales WHERE payment_intent = ?')
+        .bind(pi)
+        .first();
+      const cardId = sale ? sale.card_id : null;
+      await env.DB
+        .prepare('INSERT OR IGNORE INTO disputes (dispute_id, payment_intent, card_id, amount_cents, status, created_at) VALUES (?,?,?,?,?,?)')
+        .bind(dispute.id, pi, cardId, Number.isInteger(dispute.amount) ? dispute.amount : null, String(dispute.status || 'open'), Date.now())
+        .run();
+      if (cardId) {
+        const n = await env.DB
+          .prepare('SELECT COUNT(*) AS n FROM disputes WHERE card_id = ?')
+          .bind(cardId)
+          .first();
+        if (((n && n.n) || 0) >= DISPUTE_AUTOHIDE_COUNT) {
+          await env.DB.prepare('UPDATE cards SET hidden = 1 WHERE id = ?').bind(cardId).run();
+          console.error(`DISPUTES: card ${cardId} auto-hidden — ${n.n} disputes (dispute ${dispute.id})`);
+        } else {
+          console.error(`DISPUTES: dispute ${dispute.id} recorded against card ${cardId}`);
+        }
+      } else {
+        console.error(`DISPUTES: dispute ${dispute.id} has no matching sale (payment_intent ${pi})`);
+      }
+    }
+    return json({ received: true });
+  }
+
   if (event && event.type === 'checkout.session.completed') {
     const session = (event.data && event.data.object) || {};
     const cardId = session.metadata && session.metadata.card_id;
@@ -594,6 +744,8 @@ async function handleWebhook(request, env) {
         card_id: cardId,
         amount_cents: amount,
         mode: 'real',
+        payment_intent: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+        buyer_email: (session.customer_details && session.customer_details.email) || null,
       });
     } catch (e) {
       if (e instanceof SoldOutError) {
@@ -647,17 +799,20 @@ async function handleCardPage(env, id, origin) {
 
   const template = await fetchAssetText(env, origin, '/card.html');
   const remaining = card.supply - card.sold;
-  const description = `${card.tagline} — ${remaining} of ${card.supply} remaining. Pay what you want.`;
+  // Scarcity copy only — never valuation copy (no prices, no "worth").
+  const lowStock = remaining > 0 && remaining <= Math.max(1, Math.ceil(card.supply * 0.1));
+  const scarcity = remaining === 0 ? 'SOLD OUT — ' : lowStock ? `ONLY ${remaining} LEFT — ` : '';
+  const description = `${scarcity}${card.tagline} — ${remaining} of ${card.supply} numbered copies remaining.`;
   const og = [
     '<meta property="og:type" content="website">',
     `<meta property="og:title" content="${escapeHtml(card.name)} — ME COIN">`,
     `<meta property="og:description" content="${escapeHtml(description)}">`,
-    `<meta property="og:image" content="${escapeHtml(origin)}/api/card/${escapeHtml(card.id)}/photo">`,
+    `<meta property="og:image" content="${escapeHtml(origin)}/api/card/${escapeHtml(card.id)}/og">`,
     `<meta property="og:url" content="${escapeHtml(origin)}/c/${escapeHtml(card.id)}">`,
     '<meta name="twitter:card" content="summary_large_image">',
     `<meta name="twitter:title" content="${escapeHtml(card.name)} — ME COIN">`,
     `<meta name="twitter:description" content="${escapeHtml(description)}">`,
-    `<meta name="twitter:image" content="${escapeHtml(origin)}/api/card/${escapeHtml(card.id)}/photo">`,
+    `<meta name="twitter:image" content="${escapeHtml(origin)}/api/card/${escapeHtml(card.id)}/og">`,
     `<title>${escapeHtml(card.name)} — ME COIN</title>`,
   ].join('\n');
 
@@ -792,6 +947,104 @@ async function handleAdminHide(request, env) {
   return json({ ok: true });
 }
 
+/** Review queue — every card a human hasn't approved for real charges yet.
+    Real-mode checkout 409s until reviewed = 1; demo mode is unaffected. */
+async function handleAdminQueue(env, url) {
+  if (!adminAuthorized(env, url.searchParams.get('key'))) return err(401, 'unauthorized');
+
+  const { results } = await env.DB
+    .prepare('SELECT id, name, attestation, supply, created_at FROM cards WHERE reviewed = 0 AND hidden = 0 ORDER BY created_at ASC LIMIT 200')
+    .all();
+
+  const rows = results
+    .map(
+      (c) => `<tr>
+<td><a href="/c/${escapeHtml(c.id)}">${escapeHtml(c.id)}</a></td>
+<td>${escapeHtml(c.name)}</td>
+<td>${escapeHtml(c.attestation)}</td>
+<td>${escapeHtml(c.supply)}</td>
+<td><a href="/api/card/${escapeHtml(c.id)}/photo">photo</a></td>
+<td>${escapeHtml(new Date(c.created_at).toISOString())}</td>
+<td><button class="ok-btn" data-card="${escapeHtml(c.id)}">APPROVE</button>
+<button class="hide-btn" data-card="${escapeHtml(c.id)}">HIDE</button></td>
+</tr>`,
+    )
+    .join('\n');
+
+  const page = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REVIEW QUEUE — ME COIN ADMIN</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#0a0a0b;color:#fafaf9;font-family:'Inter',system-ui,-apple-system,sans-serif;padding:32px;font-size:14px}
+  h1{font-size:18px;font-weight:700;margin:0 0 4px}
+  .sub{color:#71717a;margin:0 0 24px;font-size:13px}
+  table{border-collapse:collapse;width:100%;background:#111114;border:1px solid #27272a}
+  th,td{border:1px solid #27272a;padding:8px 12px;text-align:left;font-size:13px;vertical-align:top}
+  th{color:#a1a1aa;letter-spacing:.04em;font-weight:600}
+  a{color:#c8a462;text-decoration:underline}
+  button{background:transparent;font-family:inherit;font-size:12px;padding:5px 10px;cursor:pointer;border-radius:4px;margin-right:6px}
+  .ok-btn{border:1px solid #34d399;color:#34d399}
+  .ok-btn:hover{background:#34d399;color:#0a0a0b}
+  .hide-btn{border:1px solid #f87171;color:#f87171}
+  .hide-btn:hover{background:#f87171;color:#0a0a0b}
+  button:disabled{opacity:.4;cursor:default}
+  .empty{color:#71717a;padding:32px;text-align:center}
+</style>
+</head>
+<body>
+<h1>ME COIN — REVIEW QUEUE</h1>
+<p class="sub">${escapeHtml(results.length)} card(s) awaiting human review (oldest first, max 200). No card takes a real charge until approved here.</p>
+${results.length === 0 ? '<p class="empty">Queue is clear. Every live card has been looked at by a human.</p>' : `<table>
+<thead><tr><th>CARD</th><th>NAME</th><th>ATTESTATION</th><th>SUPPLY</th><th>PHOTO</th><th>MINTED</th><th></th></tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>`}
+<script>
+(function () {
+  var key = new URLSearchParams(location.search).get('key');
+  function wire(sel, path, doneText) {
+    document.querySelectorAll(sel).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key, card_id: btn.dataset.card })
+        }).then(function (res) {
+          btn.textContent = res.ok ? doneText : 'FAILED';
+          if (!res.ok) btn.disabled = false;
+        }).catch(function () {
+          btn.textContent = 'FAILED';
+          btn.disabled = false;
+        });
+      });
+    });
+  }
+  wire('.ok-btn', '/admin/approve', 'APPROVED');
+  wire('.hide-btn', '/admin/hide', 'HIDDEN');
+})();
+</script>
+</body>
+</html>`;
+  return htmlResponse(page);
+}
+
+async function handleAdminApprove(request, env) {
+  const body = await readJson(request);
+  if (!body) return err(400, 'invalid json body');
+  if (!adminAuthorized(env, body.key)) return err(401, 'unauthorized');
+  if (typeof body.card_id !== 'string' || !CARD_ID_RE.test(body.card_id)) {
+    return err(400, 'bad card_id');
+  }
+  await env.DB.prepare('UPDATE cards SET reviewed = 1 WHERE id = ?').bind(body.card_id).run();
+  return json({ ok: true });
+}
+
 // ---------------------------------------------------------------------------
 // Router (ARCHITECTURE.md §8)
 // ---------------------------------------------------------------------------
@@ -806,8 +1059,17 @@ async function route(request, env, url) {
   // ---- JSON API ----
   if (path === '/api/config') {
     if (method !== 'GET') return err405();
+    const base = {
+      version: VERSION,
+      fee_formula: { fixed_cents: FEE_FIXED_CENTS, rate: FEE_RATE },
+      min_cents: AMOUNT_MIN_CENTS,
+      launch_cap_cents: LAUNCH_PRICE_CAP_CENTS,
+      young_card_cap_cents: YOUNG_CARD_CAP_CENTS,
+    };
     return json(
-      REAL ? { mode: 'real', publishable_key: env.STRIPE_PUBLISHABLE_KEY || null } : { mode: 'demo' },
+      REAL
+        ? { mode: 'real', publishable_key: env.STRIPE_PUBLISHABLE_KEY || null, ...base }
+        : { mode: 'demo', ...base },
     );
   }
   if (path === '/api/cards') {
@@ -821,6 +1083,10 @@ async function route(request, env, url) {
   if ((m = path.match(/^\/api\/card\/([^/]+)\/photo$/))) {
     if (method !== 'GET') return err405();
     return handlePhoto(env, m[1]);
+  }
+  if ((m = path.match(/^\/api\/card\/([^/]+)\/og$/))) {
+    if (method !== 'GET') return err405();
+    return handleOg(env, m[1]);
   }
   if ((m = path.match(/^\/api\/card\/([^/]+)\/sales$/))) {
     if (method !== 'GET') return err405();
@@ -895,6 +1161,14 @@ async function route(request, env, url) {
     if (method !== 'POST') return err405();
     return handleAdminHide(request, env);
   }
+  if (path === '/admin/queue') {
+    if (method !== 'GET') return err405();
+    return handleAdminQueue(env, url);
+  }
+  if (path === '/admin/approve') {
+    if (method !== 'POST') return err405();
+    return handleAdminApprove(request, env);
+  }
 
   // Anything else the Worker receives (deep /c/*, unknown /admin/*) → HTML 404.
   return notFoundPage();
@@ -909,7 +1183,7 @@ export default {
     } catch (e) {
       console.error('internal error:', e && e.stack ? e.stack : e);
       const path = url.pathname;
-      if (path.startsWith('/api/') || path === '/webhook' || path === '/admin/hide') {
+      if (path.startsWith('/api/') || path === '/webhook' || path === '/admin/hide' || path === '/admin/approve') {
         return err(500, 'internal error');
       }
       return errorPage(500, '500 — MARKET MALFUNCTION', 'Something broke behind the counter. Refresh and try again.');
