@@ -128,6 +128,7 @@ const MIGRATION_STATEMENTS = [
   'ALTER TABLE cards ADD COLUMN referred_by TEXT',
   'ALTER TABLE sales ADD COLUMN payment_intent TEXT',
   'ALTER TABLE sales ADD COLUMN buyer_email TEXT',
+  'ALTER TABLE reports ADD COLUMN reporter_ip TEXT',
 ];
 
 let schemaReady = null; // module-level (per isolate)
@@ -139,7 +140,12 @@ export function ensureSchema(env) {
       for (const sql of MIGRATION_STATEMENTS) {
         try {
           await env.DB.prepare(sql).run();
-        } catch { /* column exists */ }
+        } catch (e) {
+          // Only the expected duplicate-column error is benign; anything
+          // else (transient D1 failure) must reset schemaReady and retry,
+          // or this isolate would run forever against missing columns.
+          if (!/duplicate column/i.test(String(e && e.message))) throw e;
+        }
       }
     })().catch((e) => { schemaReady = null; throw e; });
   }
@@ -160,14 +166,20 @@ const err = (status, message) => json({ error: message }, status);
 const err404 = () => err(404, 'not found');
 const err405 = () => err(405, 'method not allowed');
 
-const htmlResponse = (html, status = 200) =>
+const htmlResponse = (html, status = 200, extraHeaders = null) =>
   new Response(html, {
     status,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': CSP,
+      ...(extraHeaders || {}),
     },
   });
+
+// Admin pages carry the key in the query string (no session layer exists);
+// suppress Referer so it never leaves the page, and never cache it.
+const adminHtmlResponse = (html) =>
+  htmlResponse(html, 200, { 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' });
 
 /** Minimal Worker-generated dark error page (DESIGN.md palette). */
 function errorPage(status, heading, message) {
@@ -279,7 +291,9 @@ async function loadCardPublic(env, id, row = undefined) {
     sold: card.sold,
     onboarded: card.charges_enabled === 1,
     created_at: card.created_at,
-    price_floor_cents: card.price_floor_cents || 50,
+    // Effective floor — pre-restructure cards carry sub-$1 floors the
+    // checkout no longer accepts, so never display one.
+    price_floor_cents: Math.max(card.price_floor_cents || AMOUNT_MIN_CENTS, AMOUNT_MIN_CENTS),
     attestation: card.attestation || 'self',
     reviewed: card.reviewed === 1,
     stats: {
@@ -496,26 +510,32 @@ async function handleCheckout(request, env, REAL, origin) {
     const floorStr = '$' + (floorCents / 100).toFixed(2);
     return err(400, `amount must be at least ${floorStr}`);
   }
-  // Launch caps: $500/sale globally, $100/sale while a card is under 7 days old.
-  const cap = Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS;
+  // Launch caps: $500/sale globally, $100/sale while a card is under 7 days
+  // old — but paying the creator's floor is ALWAYS allowed, or a high-floor
+  // young card would be unsellable for a week (floor/cap deadlock).
+  const baseCap = Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS;
+  const cap = Math.max(baseCap, floorCents);
   if (amount > cap) {
-    return err(400, `launch cap: $${(cap / 100).toFixed(0)} max per sale${cap === YOUNG_CARD_CAP_CENTS ? ' while a card is under a week old' : ''}`);
+    return err(400, `launch cap: $${(cap / 100).toFixed(0)} max per sale${baseCap === YOUNG_CARD_CAP_CENTS ? ' while a card is under a week old' : ''}`);
   }
   if (card.charges_enabled !== 1) return err(409, 'not for sale yet');
   if (card.sold >= card.supply) return err(409, 'sold out');
   // Real charges require a human to have reviewed the card photo first.
   if (REAL && card.reviewed !== 1) return err(409, 'this card is pending review — real purchases unlock once a human has looked at it');
 
-  // Velocity: max 10 checkout sessions per IP per rolling hour.
-  const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
-  const recentCheckouts = await env.DB
-    .prepare('SELECT COUNT(*) AS n FROM checkout_log WHERE ip = ? AND created_at > ?')
-    .bind(ip, Date.now() - 3600000)
-    .first();
-  if (((recentCheckouts && recentCheckouts.n) || 0) >= CHECKOUT_LIMIT_PER_IP) {
-    return err(429, 'rate limit: too many checkouts this hour');
+  // Velocity (real mode only — demo play shouldn't burn fraud limits):
+  // max 10 checkout sessions per IP per rolling hour.
+  if (REAL) {
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
+    const recentCheckouts = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM checkout_log WHERE ip = ? AND created_at > ?')
+      .bind(ip, Date.now() - 3600000)
+      .first();
+    if (((recentCheckouts && recentCheckouts.n) || 0) >= CHECKOUT_LIMIT_PER_IP) {
+      return err(429, 'rate limit: too many checkouts this hour');
+    }
+    await env.DB.prepare('INSERT INTO checkout_log (ip, created_at) VALUES (?,?)').bind(ip, Date.now()).run();
   }
-  await env.DB.prepare('INSERT INTO checkout_log (ip, created_at) VALUES (?,?)').bind(ip, Date.now()).run();
 
   if (!REAL) {
     // Stateless demo session id: demo_<card_id>_<amount_cents>_<8 lowercase hex>
@@ -621,19 +641,33 @@ async function handleReport(request, env) {
   if (reason === null || reason.length < 1 || reason.length > REASON_MAX) {
     return err(400, `reason must be 1-${REASON_MAX} characters`);
   }
+
+  // Rate limit: 5 reports per IP per hour — reporting is anonymous, so
+  // without this (and the DISTINCT count below) three POSTs from one
+  // griefer could take down any card.
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
+  const recentByIp = await env.DB
+    .prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_ip = ? AND created_at > ?')
+    .bind(ip, Date.now() - 3600000)
+    .first();
+  if (((recentByIp && recentByIp.n) || 0) >= 5) {
+    return err(429, 'rate limit: too many reports this hour');
+  }
+
   await env.DB
-    .prepare('INSERT INTO reports (card_id, reason, created_at) VALUES (?,?,?)')
-    .bind(card.id, reason, Date.now())
+    .prepare('INSERT INTO reports (card_id, reason, created_at, reporter_ip) VALUES (?,?,?,?)')
+    .bind(card.id, reason, Date.now(), ip)
     .run();
 
-  // Auto-hide: 3+ reports inside 7 days pulls the card pending human review.
+  // Auto-hide: 3+ DISTINCT reporters inside 7 days pulls the card pending
+  // human review (restorable via /admin/unhide).
   const recent = await env.DB
-    .prepare('SELECT COUNT(*) AS n FROM reports WHERE card_id = ? AND created_at > ?')
+    .prepare('SELECT COUNT(DISTINCT reporter_ip) AS n FROM reports WHERE card_id = ? AND created_at > ?')
     .bind(card.id, Date.now() - REPORT_AUTOHIDE_MS)
     .first();
   if (((recent && recent.n) || 0) >= REPORT_AUTOHIDE_COUNT && card.hidden === 0) {
     await env.DB.prepare('UPDATE cards SET hidden = 1 WHERE id = ?').bind(card.id).run();
-    console.error(`MODERATION: card ${card.id} auto-hidden — ${recent.n} reports in 7 days`);
+    console.error(`MODERATION: card ${card.id} auto-hidden — ${recent.n} distinct reporters in 7 days`);
   }
   return json({ ok: true }, 201);
 }
@@ -664,7 +698,10 @@ async function handleDemoConfirm(request, env) {
   const card = await loadCardRow(env, cardId);
   if (!card) return err404();
   const demoFloor = Math.max(card.price_floor_cents || AMOUNT_MIN_CENTS, AMOUNT_MIN_CENTS);
-  const demoCap = Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS;
+  const demoCap = Math.max(
+    Date.now() - card.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS,
+    demoFloor,
+  );
   if (amountCents < demoFloor || amountCents > demoCap) {
     return err(400, 'amount is outside the floor/cap bounds');
   }
@@ -837,8 +874,17 @@ async function handleDemoPayPage(env, url) {
   const sessionId = url.searchParams.get('session');
   if (!sessionId || !DEMO_SESSION_RE.test(sessionId)) return notFoundPage();
   const { cardId, amountCents } = parseDemoSession(sessionId);
-  if (amountCents < AMOUNT_MIN_CENTS || amountCents > AMOUNT_MAX_CENTS) return notFoundPage();
-  const card = await loadCardPublic(env, cardId);
+  const row = await loadCardRow(env, cardId);
+  if (!row) return notFoundPage();
+  // Mirror the confirm-side floor/cap math so hand-crafted session links
+  // 404 up front instead of rendering an impossible checkout amount.
+  const pageFloor = Math.max(row.price_floor_cents || AMOUNT_MIN_CENTS, AMOUNT_MIN_CENTS);
+  const pageCap = Math.max(
+    Date.now() - row.created_at < YOUNG_CARD_MS ? YOUNG_CARD_CAP_CENTS : LAUNCH_PRICE_CAP_CENTS,
+    pageFloor,
+  );
+  if (amountCents < pageFloor || amountCents > pageCap) return notFoundPage();
+  const card = await loadCardPublic(env, cardId, row);
   if (!card) return notFoundPage();
   const payload = { session_id: sessionId, amount_cents: amountCents, card };
   const template = await fetchAssetText(env, url.origin, '/demo-pay.html');
@@ -873,7 +919,8 @@ async function handleAdminReports(env, url) {
 <td><a href="/c/${escapeHtml(r.card_id)}">${escapeHtml(r.card_id)}</a></td>
 <td class="reason">${escapeHtml(r.reason)}</td>
 <td>${escapeHtml(new Date(r.created_at).toISOString())}</td>
-<td><button class="hide-btn" data-card="${escapeHtml(r.card_id)}">HIDE CARD</button></td>
+<td><button class="hide-btn" data-card="${escapeHtml(r.card_id)}">HIDE CARD</button>
+<button class="unhide-btn" data-card="${escapeHtml(r.card_id)}">UNHIDE</button></td>
 </tr>`,
     )
     .join('\n');
@@ -894,8 +941,10 @@ async function handleAdminReports(env, url) {
   th{color:#a1a1aa;letter-spacing:.04em;font-weight:600}
   td.reason{max-width:420px;word-break:break-word}
   a{color:#c8a462;text-decoration:underline}
-  button{background:transparent;border:1px solid #f87171;color:#f87171;font-family:inherit;font-size:12px;padding:5px 10px;cursor:pointer;border-radius:4px}
+  button{background:transparent;border:1px solid #f87171;color:#f87171;font-family:inherit;font-size:12px;padding:5px 10px;cursor:pointer;border-radius:4px;margin-right:6px}
   button:hover{background:#f87171;color:#0a0a0b}
+  button.unhide-btn{border-color:#34d399;color:#34d399}
+  button.unhide-btn:hover{background:#34d399;color:#0a0a0b}
   button:disabled{opacity:.4;cursor:default}
   .empty{color:#71717a;padding:32px;text-align:center}
 </style>
@@ -912,28 +961,32 @@ ${rows}
 <script>
 (function () {
   var key = new URLSearchParams(location.search).get('key');
-  document.querySelectorAll('.hide-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      btn.textContent = 'HIDING…';
-      fetch('/admin/hide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: key, card_id: btn.dataset.card })
-      }).then(function (res) {
-        btn.textContent = res.ok ? 'HIDDEN' : 'FAILED';
-        if (!res.ok) btn.disabled = false;
-      }).catch(function () {
-        btn.textContent = 'FAILED';
-        btn.disabled = false;
+  function wire(sel, path, busy, done) {
+    document.querySelectorAll(sel).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        btn.textContent = busy;
+        fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key, card_id: btn.dataset.card })
+        }).then(function (res) {
+          btn.textContent = res.ok ? done : 'FAILED';
+          if (!res.ok) btn.disabled = false;
+        }).catch(function () {
+          btn.textContent = 'FAILED';
+          btn.disabled = false;
+        });
       });
     });
-  });
+  }
+  wire('.hide-btn', '/admin/hide', 'HIDING…', 'HIDDEN');
+  wire('.unhide-btn', '/admin/unhide', 'RESTORING…', 'RESTORED');
 })();
 </script>
 </body>
 </html>`;
-  return htmlResponse(page);
+  return adminHtmlResponse(page);
 }
 
 async function handleAdminHide(request, env) {
@@ -1031,7 +1084,7 @@ ${rows}
 </script>
 </body>
 </html>`;
-  return htmlResponse(page);
+  return adminHtmlResponse(page);
 }
 
 async function handleAdminApprove(request, env) {
@@ -1042,6 +1095,19 @@ async function handleAdminApprove(request, env) {
     return err(400, 'bad card_id');
   }
   await env.DB.prepare('UPDATE cards SET reviewed = 1 WHERE id = ?').bind(body.card_id).run();
+  return json({ ok: true });
+}
+
+/** Restore an auto-hidden (or wrongly hidden) card — auto-hide is supposed
+    to be "pulled pending review", and review needs a way to put it back. */
+async function handleAdminUnhide(request, env) {
+  const body = await readJson(request);
+  if (!body) return err(400, 'invalid json body');
+  if (!adminAuthorized(env, body.key)) return err(401, 'unauthorized');
+  if (typeof body.card_id !== 'string' || !CARD_ID_RE.test(body.card_id)) {
+    return err(400, 'bad card_id');
+  }
+  await env.DB.prepare('UPDATE cards SET hidden = 0 WHERE id = ?').bind(body.card_id).run();
   return json({ ok: true });
 }
 
@@ -1168,6 +1234,10 @@ async function route(request, env, url) {
   if (path === '/admin/approve') {
     if (method !== 'POST') return err405();
     return handleAdminApprove(request, env);
+  }
+  if (path === '/admin/unhide') {
+    if (method !== 'POST') return err405();
+    return handleAdminUnhide(request, env);
   }
 
   // Anything else the Worker receives (deep /c/*, unknown /admin/*) → HTML 404.
